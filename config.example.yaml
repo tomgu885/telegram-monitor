@@ -1,0 +1,6 @@
+telegram:
+  watch_all: true
+
+important:
+  chat_ids: [] # e.g. [-1001234567890, -1009876543210]
+  user_ids: [] # e.g. [123456789, 987654321]
