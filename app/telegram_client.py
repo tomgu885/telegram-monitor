@@ -1,4 +1,4 @@
-"""Telethon user session: receive updates only; never sends/reads/reacts to messages."""
+"""Telethon recorder with explicitly configured screenshot replies."""
 
 import asyncio
 import contextlib
@@ -15,6 +15,7 @@ from telethon import TelegramClient, errors, events
 from app.config import Settings
 from app.logging_config import log_failure
 from app.models import normalize, parse_message, utc_now
+from app.screenshot_handler import ScreenshotHandler
 from app.storage import Storage
 
 logger = logging.getLogger("app")
@@ -85,6 +86,7 @@ class Recorder:
         self.settings = settings
         self.storage = storage
         self.pending_writes = 0
+        self.screenshots = ScreenshotHandler(settings.screenshot)
 
     async def persist(self, operation: Callable[[], object]) -> object:
         self.pending_writes += 1
@@ -103,6 +105,7 @@ class Recorder:
 
     async def message(self, event, event_type: str) -> None:
         received_at = utc_now()
+        screenshot_request = event_type == "message_new" and self.screenshots.accepts(event)
         try:
             record = parse_message(event, self.settings, received_at=received_at)
         except Exception as exc:
@@ -133,6 +136,7 @@ class Recorder:
                 record["important"] = bool(reason)
             if (
                 not self.settings.watch_all
+                and not screenshot_request
                 and not record["important"]
                 and not (old and event_type == "message_edited")
             ):
@@ -150,6 +154,8 @@ class Recorder:
                 event_type,
                 len(record["text"]),
             )
+            if screenshot_request:
+                self.screenshots.submit(event)
 
     async def deleted(self, event) -> None:
         chat_id = event.chat_id
@@ -259,6 +265,7 @@ async def run(settings: Settings, storage: Storage) -> None:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await recorder.screenshots.close()
         await client.disconnect()
         for sig in (signal.SIGINT, signal.SIGTERM):
             with contextlib.suppress(ValueError):

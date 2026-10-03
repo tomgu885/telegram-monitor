@@ -3,9 +3,9 @@
 Python 3.12+、Telethon MTProto 普通用户账号、SQLite 和本地 JSONL。支持 macOS / Linux，
 使用系统文件锁防止同一个 data 目录被多个进程同时写入。
 
-只被动记录 Telegram 下发的新消息、编辑和可识别的删除事件。没有 Bot API、
-Codex/OpenAI 调用、prompt builder、Jira、workflow 或自动任务功能；不会发送、回复、
-转发、reaction、标记已读，也不会下载媒体或递归获取被回复的消息。
+默认被动记录 Telegram 下发的新消息、编辑和可识别的删除事件。可在 macOS 27 上显式启用
+授权用户请求主显示器截图，并用当前账号私聊返回 PNG。没有 Bot API、Codex/OpenAI 调用
+或语义判断；不转发、reaction、标记已读，也不下载媒体或递归获取被回复的消息。
 
 ## 安装与启动
 
@@ -68,6 +68,7 @@ important:
 - `chat_ids` 与 `user_ids` 是 **OR**：分别标记 `chat_id`、`user_id`，同时命中标记
   `chat_id,user_id`。重点消息也照常进入完整 archive，不会漏掉普通消息。
 - `watch_all: false` 只记录命中任一列表的消息；两个列表都为空时不采集普通消息。
+  启用截图后，符合截图授权、来源与命令规则的请求始终记录，详见截图功能说明。
   已有记录的编辑仍维护最新状态，即使后来调整了关注列表。
   删除事件只处理配置中的 chat 或数据库里已有记录；未知 chat 的删除无法过滤，故跳过。
 - Chat 使用 Telethon 带符号的 ID：用户通常为正数，普通群为负数，频道/超级群为 `-100…`。
@@ -115,6 +116,85 @@ python3 -m app
 异常仅记录异常类型和调用位置，不记录异常正文、局部变量或完整更新对象。
 Telethon 底层日志被屏蔽，避免异常包含聊天内容或 RPC 参数。
 
+## 可选：Telegram 请求主显示器截图（macOS 27）
+
+截图功能使用当前登录的 Telethon 普通用户账号；没有 AI、LLM、OpenAI API 或新增运行时依赖。
+旧配置无需修改即可继续运行，缺少 `screenshot` 时功能关闭。要启用，在项目根目录
+`config.yaml` 添加以下配置，并将示例 ID 换成实际授权用户的整数 ID：
+
+```yaml
+screenshot:
+  enabled: true
+  screenshot_uids:
+    - 123456789
+    - 987654321
+  commands:
+    - "截图"
+    - "screenshot"
+  temp_dir: "data/screenshots"
+  allow_groups: false
+  keep_failed: false
+  cooldown_seconds: 5
+```
+
+- 示例配置文件默认 `enabled: false`、授权列表为空；必须主动开启并填写授权 ID。
+  `important.user_ids` 不授予截图权限，两份列表各自独立。
+- 消息去掉首尾空白并转小写后，必须与命令完全相等。`截图`、`SCREENSHOT` 可以匹配；
+  `帮我截图一下`、`please screenshot` 不匹配。不做语义理解。
+- 仅处理授权用户的入站新消息，默认仅私聊；自己发出的消息、编辑、重复更新不触发。
+  未授权请求、冷却期内请求均静默忽略，不发送权限或限流提示。
+- 显式设置 `allow_groups: true` 才允许普通群/超级群触发，截图仍只私发给请求者，
+  不发到群内，也不把群消息 ID 用作私聊回复 ID。广播频道不支持触发。
+- 同一 sender 默认 5 秒内最多一次，使用单调时钟，排队后的执行也检查冷却。
+  全局锁覆盖截图、上传和清理，多个请求依次执行。冷却状态保存在内存，重启后重置。
+- 私聊通过 `event.respond(file=..., reply_to=event.id, force_document=True)` 发送原始 PNG
+  文件，不附带机器名、用户名、完整本地路径或额外 caption。
+  [Telethon 文件发送参数](https://docs.telethon.dev/en/stable/modules/client.html#telethon.client.uploads.UploadMethods.send_file)。
+- 请求先写入 SQLite 和持久化 JSONL outbox，然后启动截图任务；JSONL 继续由后台归档。
+  命中 `important` 的请求还会进入 important archive。即使 `watch_all: false`，符合截图
+  授权、来源与命令规则的新请求也会记录，以保留操作依据；普通消息仍遵循原有过滤规则。
+- 截图失败不撤销已保存的消息，也不停止监听器。截图与发送在后台处理，消息记录继续运行。
+  截图动作不是持久化任务：退出会取消未完成任务，已记录的请求不会在重启后重试。
+  尚未记录的离线新消息可能通过现有 `catch_up` 机制触发一次截图。
+
+只调用固定命令 `/usr/sbin/screencapture -m -x <程序生成的临时PNG>`，不使用 `shell=True`。
+`-m` 只截主显示器，`-x` 静音；文件名唯一，不接受 Telegram 指定的路径、显示器或参数。
+截图命令超时为 15 秒，发送超时为 60 秒；不实现其他平台截图。
+`temp_dir` 相对项目根目录解析，与启动目录无关，也支持本机配置的绝对路径。
+新建截图目录权限为 `0700`，PNG 为 `0600`。默认目录在 Git 忽略的 `data/` 内，
+自定义目录时也应放在 Git 忽略且访问受限的位置。
+
+正常完成、捕获失败、发送失败或任务取消都会尝试清理临时文件，失败只记录脱敏错误。
+仅当 `keep_failed: true` 时保留已生成但发送失败的 PNG 供本机调试，成功发送仍删除。
+取消时会等待正在执行的截图子进程结束后再清理；强杀/断电无法执行 `finally`，
+可能留下文件，需要停机后检查临时目录。日志只记录 sender/message ID、大小和状态，路径脱敏。
+
+### 屏幕录制权限
+
+首次截图可能需要 macOS 授权。到 **System Settings → Privacy & Security →
+Screen & System Audio Recording**，为实际运行 Python 的宿主程序授权，例如 Terminal、
+iTerm 或 Ghostty；以后封装为 app 时给对应 app 授权。按系统提示重启宿主程序。
+程序不会绕过权限系统，捕获失败会在日志提示检查 Screen Recording permission。
+[Apple 权限说明](https://support.apple.com/en-gb/guide/mac-help/mchl592e5686/mac)。
+
+### 手动验收
+
+在运行目录执行 `python3 -m app --check-config`，再执行 `python3 -m app`。
+配置修改后需要重启。先使用无敏感内容的测试桌面：
+
+1. 授权用户私聊发 `截图`，应在原私聊收到回复该消息的 PNG；超过 5 秒再发 `screenshot`
+   也应成功。发送后检查 `data/screenshots` 无残留 PNG。
+2. 未授权用户私聊发 `截图`，应无截图、无任何回复；日志可见 ignored metadata。
+3. 授权用户在群内发 `截图`（`allow_groups: false`），应无截图或回复。
+4. 同一用户在 5 秒内连续请求，第二次应静默忽略；普通文字不触发。
+5. 连接多个显示器，使用扩展桌面，在主屏和副屏各放不同的测试标记。
+   请求截图，确认 PNG 只有主屏内容，没有副屏标记或多屏拼接。
+6. 配置授权用户同时命中 `important.user_ids`，确认请求存在于 SQLite、普通 JSONL
+   与 important JSONL；截图失败也应留下请求记录。
+
+自动测试全部 mock `subprocess.run` 和 Telegram 发送，不会真实截屏、上传或连接 Telegram。
+真实 Screen Recording 权限、Telegram 收图和多显示器效果需按以上步骤验收。
+
 ## 目录与主要模块
 
 ```text
@@ -124,6 +204,8 @@ telegram-monitor/
 │   ├── __main__.py          # 启动、单实例锁、最终归档与关闭
 │   ├── config.py            # .env/YAML 读取、校验、OR 匹配
 │   ├── telegram_client.py   # 登录、新消息/编辑/删除监听、重连、信号
+│   ├── screenshot.py        # 固定主显示器截图、临时文件清理
+│   ├── screenshot_handler.py # 授权、精确匹配、冷却、并发锁与私聊发送
 │   ├── models.py            # 原文/身份/媒体解析、UTC 时间、JSON normalization
 │   ├── storage.py           # SQLite 最新状态、索引、事务待归档队列
 │   ├── archive.py           # append-only JSONL + fsync
@@ -142,6 +224,7 @@ telegram-monitor/
     ├── telegram.session
     ├── messages.db          # 运行时可能带 -wal、-shm
     ├── recorder.lock
+    ├── screenshots/         # 临时 PNG，默认发送后清理
     ├── archive/YYYY-MM-DD.jsonl
     └── important/YYYY-MM-DD.jsonl
 ```
@@ -263,4 +346,4 @@ ruff format --check app tests
 测试使用临时目录、fake Telegram event/client 及本地构造的 Telethon 类型，不读取真实凭据，
 不连接 Telegram、不发送任何群消息。覆盖插入与跨 chat 去重、三种重点匹配、编辑/删除、
 乱序事件、JSON fallback、媒体信息、SQL 查询、归档追加与失败恢复、登录模拟、重连、
-日志隐私，以及子进程中的 SIGINT/SIGTERM 收尾。没有引入单独的 type checker。
+日志隐私、截图授权/命令/群聊限制/冷却/并发/失败与取消清理，以及子进程中的 SIGINT/SIGTERM 收尾。没有引入单独的 type checker。
