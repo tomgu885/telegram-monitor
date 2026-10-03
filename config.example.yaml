@@ -4,3 +4,14 @@ telegram:
 important:
   chat_ids: [] # e.g. [-1001234567890, -1009876543210]
   user_ids: [] # e.g. [123456789, 987654321]
+
+screenshot:
+  enabled: false
+  screenshot_uids: [] # Only explicitly listed positive Telegram user IDs may request a capture.
+  commands:
+    - "截图"
+    - "screenshot"
+  temp_dir: "data/screenshots"
+  allow_groups: false
+  keep_failed: false
+  cooldown_seconds: 5

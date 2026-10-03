@@ -31,7 +31,7 @@ def instance_lock(data_dir: Path):
 def main() -> int:
     os.umask(0o077)
     setup_logging()
-    parser = argparse.ArgumentParser(description="Passive local Telegram message recorder")
+    parser = argparse.ArgumentParser(description="Local Telegram recorder with opt-in screenshots")
     parser.add_argument("--check-config", action="store_true", help="只检查配置，不连接 Telegram")
     args = parser.parse_args()
     if sys.version_info < (3, 12):  # noqa: UP036 - give older interpreters a clear startup error
