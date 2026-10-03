@@ -67,7 +67,7 @@ important:
   包括在其他客户端发出的自己消息，使用 `is_outgoing` 区分。不是扫描 Telegram 所有群。
 - `chat_ids` 与 `user_ids` 是 **OR**：分别标记 `chat_id`、`user_id`，同时命中标记
   `chat_id,user_id`。重点消息也照常进入完整 archive，不会漏掉普通消息。
-- `watch_all: false` 只记录命中任一列表的消息；两个列表都为空时不采集普通消息。
+- `watch_all: false` 只记录命中任一列表的普通消息；群内 @我的 UG 编号消息始终记录。
   启用截图后，符合截图授权、来源与命令规则的请求始终记录，详见截图功能说明。
   已有记录的编辑仍维护最新状态，即使后来调整了关注列表。
   删除事件只处理配置中的 chat 或数据库里已有记录；未知 chat 的删除无法过滤，故跳过。
@@ -115,6 +115,36 @@ python3 -m app
 
 异常仅记录异常类型和调用位置，不记录异常正文、局部变量或完整更新对象。
 Telethon 底层日志被屏蔽，避免异常包含聊天内容或 RPC 参数。
+
+## 群内 @我的 UG 编号记录
+
+启动后自动读取当前登录账号的 ID 和用户名（含激活的备用用户名）。收到普通群或超级群
+消息时，仅当消息明确 @该账号，且正文包含大写 `UG-` 加 ASCII 数字（例如 `UG-2530`），
+才提取编号。支持 `@username` 和按用户 ID 的提及；按 Telegram 的 UTF-16 实体偏移解析，
+前面有 emoji 也能识别。私聊、广播频道、自己发出的消息、只回复自己但没有明确 @的消息不匹配。
+匹配规则避免从 `XUG-123`、`UG-123abc` 中提取部分编号；中文、标点和链接路径可紧邻编号。
+[Telegram 提及实体说明](https://core.telegram.org/api/mentions)。
+
+命中消息会标为 `important_reason=ug_mention`（与现有关注原因叠加），即使
+`watch_all: false` 也保存，并写入普通和 important JSONL，事件里附带 `ug_mentions` 编号数组。
+`data/messages.db` 的 `ug_mentions` 表单独保存每个编号的群 ID/名称、消息 ID、发送者 ID/用户名、
+消息时间、原文和首次/最近记录时间，全部时间为 UTC。
+
+同一消息的相同编号只保留一行，不同群或不同消息提到同一编号分别记录。新消息和后续编辑
+都参与匹配；编辑仍命中时更新该编号的原文，新增编号另记一行。后来移除 @/编号或删除消息
+不会抹掉已记录的证据。表中的原文是最后一次命中时的快照，不保证是消息当前文本；
+消息当前状态和可识别的删除标记在 `telegram_messages`，完整编辑历史在 JSONL。
+迟到的旧编辑只进入 JSONL，不覆盖编号表。编号、消息状态与归档队列在同一 SQLite 事务中提交。
+
+无需新增配置；升级后重启监听器生效。只处理后续收到的新消息/编辑和 Telegram 可补发的
+离线更新，不扫描历史消息，也不自动回填已有本地消息。不会因匹配编号发送回复或通知。
+
+查看记录（只读）：
+
+```bash
+sqlite3 -readonly -header -column data/messages.db \
+  'SELECT issue_key, chat_title, sender_username, message_date, text FROM ug_mentions ORDER BY last_seen_at DESC LIMIT 100;'
+```
 
 ## 可选：Telegram 请求主显示器截图（macOS 27）
 

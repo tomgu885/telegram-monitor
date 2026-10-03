@@ -41,6 +41,20 @@ CREATE INDEX IF NOT EXISTS idx_chat_date ON telegram_messages(chat_id, message_d
 CREATE INDEX IF NOT EXISTS idx_sender_date ON telegram_messages(sender_id, message_date);
 CREATE INDEX IF NOT EXISTS idx_important_date ON telegram_messages(important, message_date);
 CREATE INDEX IF NOT EXISTS idx_message_date ON telegram_messages(message_date);
+CREATE TABLE IF NOT EXISTS ug_mentions (
+    chat_id INTEGER NOT NULL,
+    telegram_message_id INTEGER NOT NULL,
+    issue_key TEXT NOT NULL,
+    chat_title TEXT,
+    sender_id INTEGER,
+    sender_username TEXT,
+    message_date TEXT,
+    text TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY(chat_id, telegram_message_id, issue_key)
+);
+CREATE INDEX IF NOT EXISTS idx_ug_issue ON ug_mentions(issue_key);
 CREATE TABLE IF NOT EXISTS archive_outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     payload TEXT NOT NULL,
@@ -79,6 +93,7 @@ class Storage:
         if event_type not in ("message_new", "message_edited"):
             raise ValueError("Unknown message event type")
         record = dict(record)
+        issues = record.pop("ug_mentions", [])
         record["raw_json"] = json.dumps(
             normalize(record["raw_json"]), ensure_ascii=True, sort_keys=True, allow_nan=False
         )
@@ -100,10 +115,34 @@ class Storage:
                 "raw_json": json.loads(record["raw_json"]),
                 "event_type": event_type,
                 "applied": not stale,
+                "ug_mentions": issues,
             }
             if old:
                 payload["deleted_at"] = old["deleted_at"]
             if not stale:
+                for issue in issues:
+                    self.connection.execute(
+                        """INSERT INTO ug_mentions
+                           (chat_id, telegram_message_id, issue_key, chat_title, sender_id,
+                            sender_username, message_date, text, first_seen_at, last_seen_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(chat_id, telegram_message_id, issue_key) DO UPDATE SET
+                           chat_title=excluded.chat_title, sender_id=excluded.sender_id,
+                           sender_username=excluded.sender_username, text=excluded.text,
+                           last_seen_at=excluded.last_seen_at""",
+                        (
+                            record["chat_id"],
+                            record["telegram_message_id"],
+                            issue,
+                            record["chat_title"],
+                            record["sender_id"],
+                            record["sender_username"],
+                            record["message_date"],
+                            record["text"],
+                            record["received_at"],
+                            record["received_at"],
+                        ),
+                    )
                 if old:
                     record["created_at"] = old["created_at"]
                     record["received_at"] = old["received_at"]

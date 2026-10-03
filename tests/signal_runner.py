@@ -3,6 +3,7 @@
 import asyncio
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.__main__ import main
@@ -23,6 +24,9 @@ class FakeClient:
 
     async def is_user_authorized(self):
         return True
+
+    async def get_me(self):
+        return SimpleNamespace(id=100, username="myself")
 
     async def run_until_disconnected(self):
         await self.handlers[0](event())

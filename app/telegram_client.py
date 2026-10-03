@@ -8,12 +8,13 @@ import signal
 import sqlite3
 import sys
 import warnings
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from telethon import TelegramClient, errors, events
 
 from app.config import Settings
 from app.logging_config import log_failure
+from app.mentions import mentioned_issues
 from app.models import normalize, parse_message, utc_now
 from app.screenshot_handler import ScreenshotHandler
 from app.storage import Storage
@@ -87,6 +88,7 @@ class Recorder:
         self.storage = storage
         self.pending_writes = 0
         self.screenshots = ScreenshotHandler(settings.screenshot)
+        self.me = None
 
     async def persist(self, operation: Callable[[], object]) -> object:
         self.pending_writes += 1
@@ -108,6 +110,7 @@ class Recorder:
         screenshot_request = event_type == "message_new" and self.screenshots.accepts(event)
         try:
             record = parse_message(event, self.settings, received_at=received_at)
+            record["ug_mentions"] = mentioned_issues(event, self.me)
         except Exception as exc:
             log_failure("Message parsing failed; preserving raw event", exc)
             # Preserve evidence when unexpected future Telegram types break parsing.
@@ -131,9 +134,14 @@ class Recorder:
                             record[field] = old[field]
                 if record["chat_title"] is None:
                     record["chat_title"] = old["chat_title"]
-                reason = self.settings.important_reason(record["chat_id"], record["sender_id"])
-                record["important_reason"] = reason
-                record["important"] = bool(reason)
+            reason = self.settings.important_reason(record["chat_id"], record["sender_id"])
+            record["important_reason"] = reason
+            record["important"] = bool(reason)
+            if record["ug_mentions"]:
+                record["important_reason"] = ",".join(
+                    filter(None, [record["important_reason"], "ug_mention"])
+                )
+                record["important"] = True
             if (
                 not self.settings.watch_all
                 and not screenshot_request
@@ -181,7 +189,11 @@ class Recorder:
                 logger.info("[DELETE] chat=%s message=%s", chat_id, message_id)
 
 
-async def connection_loop(client: TelegramClient, settings: Settings) -> None:
+async def connection_loop(
+    client: TelegramClient,
+    settings: Settings,
+    on_authenticated: Callable[[], Awaitable[None]] | None = None,
+) -> None:
     authenticated = False
     while True:
         delay = 5
@@ -190,6 +202,8 @@ async def connection_loop(client: TelegramClient, settings: Settings) -> None:
             if authenticated and not await client.is_user_authorized():
                 raise AuthenticationFailure("Telegram session 已失效，请重新启动并登录。")
             await login(client, settings)
+            if on_authenticated is not None:
+                await on_authenticated()
             authenticated = True
             logger.info("Connected to Telegram")
             logger.info("Listening for messages...")
@@ -237,11 +251,22 @@ async def run(settings: Settings, storage: Storage) -> None:
         catch_up=True,
     )
     recorder = Recorder(settings, storage)
+    identity_ready = asyncio.Event()
+
+    async def identify_account():
+        me = await client.get_me()
+        if me is None:
+            raise AuthenticationFailure("无法确认当前 Telegram 账号，停止监听。")
+        recorder.me = me
+        identity_ready.set()
+        logger.info("UG mention tracking ready for current account (incoming groups only).")
 
     async def new_message(event):
+        await identity_ready.wait()
         await recorder.message(event, "message_new")
 
     async def edited_message(event):
+        await identity_ready.wait()
         await recorder.message(event, "message_edited")
 
     # Register BEFORE connect so catch-up updates cannot bypass the handlers.
@@ -253,7 +278,7 @@ async def run(settings: Settings, storage: Storage) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
     tasks = [
-        asyncio.create_task(connection_loop(client, settings)),
+        asyncio.create_task(connection_loop(client, settings, identify_account)),
         asyncio.create_task(archive_loop(storage)),
         asyncio.create_task(stop.wait()),
     ]
