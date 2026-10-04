@@ -1,6 +1,0 @@
-# Configure independently after inspecting the real UAT bot.
-environment: uat
-target: deployment
-entry:
-  command: /menu
-  safe_buttons: []

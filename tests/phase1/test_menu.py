@@ -148,3 +148,18 @@ def test_session_lock_is_exclusive_and_released(tmp_path):
             pass
     with session_lock(path):
         pass
+
+
+def test_cli_and_recorder_cannot_open_shared_session_together(tmp_path):
+    from app.__main__ import instance_lock
+    from app.config import ConfigError
+
+    directory = tmp_path / "data"
+    with instance_lock(directory):
+        with pytest.raises(MonitorError, match="session_busy"):
+            with session_lock(directory / "telegram.session"):
+                pytest.fail("CLI opened recorder's live session")
+    with session_lock(directory / "telegram.session"):
+        with pytest.raises(ConfigError):
+            with instance_lock(directory):
+                pytest.fail("recorder opened CLI's live session")

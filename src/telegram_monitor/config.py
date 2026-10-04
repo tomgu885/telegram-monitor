@@ -1,4 +1,4 @@
-"""Strict YAML schemas. Runtime paths are relative to the config directory's parent."""
+"""Shared root config and per-environment menus, with explicit legacy path support."""
 
 import os
 import re
@@ -40,7 +40,8 @@ class TelegramSettings(Schema):
     api_id: int | None = Field(default=None, gt=0)
     api_id_env: str = "TELEGRAM_API_ID"
     api_hash_env: str = "TELEGRAM_API_HASH"
-    session_file: str = "state/telegram.session"
+    session_file: str = "data/telegram.session"
+    watch_all: bool = True  # Consumed by the original recorder.
 
     @field_validator("api_id_env", "api_hash_env")
     @classmethod
@@ -58,12 +59,14 @@ class TelegramSettings(Schema):
 
 
 class Target(Schema):
-    chat_id: int
+    chat_id: int | None
     bot_username: str = Field(pattern=USERNAME)
 
     @field_validator("chat_id")
     @classmethod
     def chat_id_valid(cls, value):
+        if value is None:
+            return value  # An unconfigured environment must not prevent auth status.
         if not value or not -(2**63) < value < 2**63:
             raise ValueError("invalid chat id")
         return value
@@ -76,9 +79,12 @@ class Defaults(Schema):
 
 
 class Settings(Schema):
-    telegram: TelegramSettings
-    targets: dict[str, Target] = Field(min_length=1)
+    telegram: TelegramSettings = Field(default_factory=TelegramSettings)
+    targets: dict[str, Target] = Field(default_factory=dict)
     defaults: Defaults = Field(default_factory=Defaults)
+    # The recorder validates these sections using app.config when it starts.
+    important: dict = Field(default_factory=dict)
+    screenshot: dict = Field(default_factory=dict)
 
 
 class Entry(Schema):
@@ -95,10 +101,24 @@ class Entry(Schema):
         return value
 
 
+class Service(Schema):
+    aliases: list[str] = Field(default_factory=list)
+    menu_path: list[ButtonMatch] = Field(min_length=1)
+
+    @field_validator("menu_path", mode="before")
+    @classmethod
+    def expand_strings(cls, value):
+        if isinstance(value, list):
+            return [{"text": item} if isinstance(item, str) else item for item in value]
+        return value
+
+
 class Environment(Schema):
     environment: str = Field(pattern=NAME.pattern)
-    target: str = "deployment"
+    target: str | None = None
     entry: Entry
+    # Stored and validated in Phase 1; no automatic deployment is executed.
+    services: dict[str, Service] = Field(default_factory=dict)
 
 
 class UniqueLoader(yaml.SafeLoader):
@@ -140,7 +160,8 @@ def read_schema(path: Path, schema):
 class Configuration:
     def __init__(self, path: Path):
         self.path = path.resolve()
-        self.root = self.path.parent.parent
+        self.legacy_layout = self.path.parent.name == "config" and self.path.name == "telegram.yaml"
+        self.root = self.path.parent.parent if self.legacy_layout else self.path.parent
         self.settings = read_schema(self.path, Settings)
         self.session = (self.root / self.settings.telegram.session_file).resolve()
         self.state_dir = self.session.parent
@@ -152,9 +173,21 @@ class Configuration:
         if not path.is_file():
             raise MonitorError("environment_not_found", environment=name)
         env = read_schema(path, Environment)
-        if env.environment != name or env.target not in self.settings.targets:
+        if env.environment != name:
             raise MonitorError("invalid_config", reason="environment_or_target_mismatch")
+        # Old configs may explicitly reference 'deployment'. New configs default
+        # to the environment's name, with no testa/uat branches in the code.
+        if env.target is None:
+            env.target = "deployment" if self.legacy_layout else name
+        self.target(env.target)
         return env
+
+    def environment_names(self) -> list[str]:
+        return sorted(
+            path.stem
+            for path in self.path.parent.glob("*.yaml")
+            if path != self.path and not path.name.endswith(".example.yaml")
+        )
 
     def credentials(self) -> tuple[int, str]:
         values = {**dotenv_values(self.root / ".env"), **os.environ}
@@ -170,7 +203,21 @@ class Configuration:
             ) from None
         return api_id, api_hash
 
-    def target(self, name: str) -> Target:
+    def target(self, name: str | None) -> Target:
+        if name is None:
+            if "deployment" in self.settings.targets:
+                name = "deployment"  # Preserve the original public CLI default.
+            elif len(self.settings.targets) == 1:
+                name = next(iter(self.settings.targets))
+            else:
+                raise MonitorError(
+                    "invalid_config",
+                    reason="target_required_use_chat_option",
+                    available_targets=sorted(self.settings.targets),
+                )
         if name not in self.settings.targets:
             raise MonitorError("invalid_config", reason="target_not_found")
-        return self.settings.targets[name]
+        target = self.settings.targets[name]
+        if target.chat_id is None:
+            raise MonitorError("invalid_config", reason="chat_id_not_configured", target=name)
+        return target

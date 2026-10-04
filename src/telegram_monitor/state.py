@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import tempfile
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from telegram_monitor.exceptions import MonitorError
@@ -17,9 +17,8 @@ def private_directory(path: Path) -> None:
 
 
 @contextmanager
-def session_lock(session: Path):
-    private_directory(session.parent)
-    path = session.with_suffix(".session.lock")
+def file_lock(path: Path):
+    private_directory(path.parent)
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
     with os.fdopen(fd, "a") as handle:
         os.fchmod(handle.fileno(), 0o600)
@@ -31,6 +30,17 @@ def session_lock(session: Path):
             yield
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+@contextmanager
+def session_lock(session: Path):
+    with ExitStack() as locks:
+        # Also honor the recorder's pre-existing lock, including a recorder
+        # process started before this CLI update. Never copy a live session.
+        if session.name == "telegram.session":
+            locks.enter_context(file_lock(session.parent / "recorder.lock"))
+        locks.enter_context(file_lock(session.with_suffix(".session.lock")))
+        yield
 
 
 class CursorStore:

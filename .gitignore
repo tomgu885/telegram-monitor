@@ -20,4 +20,6 @@ state/*
 build/
 dist/
 .pytest_cache/
+testa.yaml
+uat.yaml
 .idea

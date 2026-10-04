@@ -97,3 +97,40 @@ def test_auth_status_unauthorized_never_logs_in(configuration, monkeypatch):
     assert result.exit_code == 41
     assert json.loads(result.stdout)["authorized"] is False
     client.send_code_request.assert_not_awaited()
+
+
+def test_default_root_config_validates_environment_files(configuration, monkeypatch):
+    monkeypatch.chdir(configuration.root)
+    result = runner.invoke(app, ["config", "validate", "--env", "testa"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["environments"] == ["testa"]
+
+
+def test_menu_environment_selects_its_own_group(configuration, monkeypatch):
+    configuration.path.write_text(
+        "telegram: {}\ntargets:\n"
+        "  testa: {chat_id: -100123, bot_username: testa_bot}\n"
+        "  uat: {chat_id: -456, bot_username: uat_bot}\n"
+    )
+    for env in ("testa", "uat"):
+        (configuration.root / f"{env}.yaml").write_text(
+            f"environment: {env}\nentry: {{command: /menu}}\n"
+        )
+    seen = []
+
+    @asynccontextmanager
+    async def fake_connect(*args, **kwargs):
+        yield object()
+
+    def fake_adapter(_client, target):
+        seen.append(target.chat_id)
+        client = AsyncMock()
+        client.open_menu.return_value = message()
+        return client
+
+    monkeypatch.setattr("telegram_monitor.cli.connect", fake_connect)
+    monkeypatch.setattr("telegram_monitor.cli.TelethonMenuClient", fake_adapter)
+    for env in ("testa", "uat"):
+        result = invoke(configuration, "menu", "open", "--env", env)
+        assert result.exit_code == 0
+    assert seen == [-100123, -456]

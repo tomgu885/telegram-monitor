@@ -5,7 +5,8 @@ Typer 和经过 schema 校验的 YAML。按需求到 Phase 1 停止，仅提供�
 `deploy`、`deploy-many`、`services`、`service show`、`learn`、部署关联、历史和部署锁留待后续阶段。
 没有猜测任何真实 testa / uat 服务菜单路径，不接入 Jira，不依赖 GUI、截图或 AI。
 
-原有 `python -m app` 消息记录器及截图功能保留，见本文后半部分；两套入口配置和 session 独立。
+原有 `python -m app` 消息记录器及截图功能保留，见本文后半部分。两个入口共用根目录
+`config.yaml`、`.env` 和 `data/telegram.session`；有效 session 不需要重复登录。
 
 也可以统一使用 `python3 -m app` 入口，安装后在项目目录运行：
 
@@ -17,13 +18,13 @@ python3 -m app auth login               # 新 CLI 首次登录
 python3 -m app auth status --json
 python3 -m app menu open --env testa --json
 python3 -m app menu buttons --json
-python3 -m app watch --chat deployment --sender 实际Bot用户名 --json-lines
+python3 -m app watch --chat testa --sender ugopsbot --json-lines
 ```
 
 本文所有 `telegram-monitor ...` 均可等价改写为 `python3 -m app ...` 或
 `python3 -m telegram_monitor ...`。不带参数的 `python3 -m app` 保留原有启动行为，
-使用原有 `config.yaml` / `data/telegram.session`；子命令使用新 CLI 的
-`config/telegram.yaml` / `state/telegram.session`，不会自动切换或共用旧 session。
+两个入口使用同一份 `config.yaml` / `data/telegram.session`；环境菜单分别位于根目录
+`./testa.yaml`、`./uat.yaml`。共用 session 的两个进程必须轮流运行。
 
 ## CLI 安装和配置
 
@@ -40,10 +41,10 @@ telegram-monitor --help
 首次复制示例，已有文件不要覆盖：
 
 ```bash
-cp config/telegram.example.yaml config/telegram.yaml
-cp config/testa.example.yaml config/testa.yaml
-cp config/uat.example.yaml config/uat.yaml
-chmod 600 config/telegram.yaml config/testa.yaml config/uat.yaml
+cp config.example.yaml config.yaml
+cp testa.example.yaml testa.yaml
+cp uat.example.yaml uat.yaml
+chmod 600 config.yaml testa.yaml uat.yaml
 ```
 
 从 [my.telegram.org](https://my.telegram.org/) 的 API development tools 获取个人应用 API 信息。
@@ -57,17 +58,21 @@ TELEGRAM_API_HASH=你的32位API_HASH
 环境变量优先于 `.env`；将 `.env` 设为 `0600`。CLI 不要求 `TELEGRAM_PHONE`，登录时会隐藏输入。
 `api_id` 也可直接配置在 YAML；`api_hash` 只通过 `api_hash_env` 指向的变量读取，不写进 YAML。
 
-编辑 `config/telegram.yaml`，填写真实目标（以下均为占位示例）：
+已有 `config.yaml` 时保留 `telegram.watch_all`、`important`、`screenshot` 等设置，仅合并
+下面的字段；不要覆盖原文件。testa / uat 的群 ID 统一放在 `targets`（以下 ID 需自行填写）：
 
 ```yaml
 telegram:
   api_id_env: TELEGRAM_API_ID
   api_hash_env: TELEGRAM_API_HASH
-  session_file: state/telegram.session
+  session_file: data/telegram.session
 targets:
-  deployment:
-    chat_id: -1001234567890
-    bot_username: replace_me_bot
+  testa:
+    chat_id: null  # 填入 testa 发布群数字 ID
+    bot_username: ugopsbot
+  uat:
+    chat_id: null  # 填入 uat 发布群数字 ID
+    bot_username: uguatdeploybot
 defaults:
   message_timeout_seconds: 30
   deploy_timeout_seconds: 900
@@ -77,10 +82,24 @@ defaults:
 账号必须已加入目标群；群 ID 使用 Telethon 带符号 ID，Bot 用户名可带 `@`。
 Bot 会解析成 ID 并验证 Bot 身份；只操作该群中该 Bot 的消息，不自动猜测目标。
 `deploy_timeout_seconds` 和 `poll_interval_seconds` 为后续阶段预留，本阶段使用事件监听。
-环境 YAML 与主配置同目录；session 和 `.env` 以**配置目录的上一级**为根目录解析。
-在其它工作目录运行时用 `telegram-monitor --config /绝对路径/config/telegram.yaml ...`。
+环境 YAML 与 `config.yaml` 同目录；相对 session 路径和 `.env` 均以该目录为根目录解析。
+在其它工作目录运行时用 `telegram-monitor --config /绝对路径/config.yaml ...`。
+仍兼容显式 `--config /项目/config/telegram.yaml` 的旧布局：它的相对 session / `.env` 从项目目录解析。
 
-`testa.yaml` / `uat.yaml` 独立设置 `environment`、可选 `target` 和 `entry`。
+根目录 `testa.yaml` / `uat.yaml` 设置 `environment`、`entry` 和 `services`。
+默认引用 `targets` 中与环境同名的群，也可用 `target` 显式指定；群 ID 不放在菜单文件。
+每个服务的完整 `menu_path` 也放在对应环境文件，支持字符串（默认 contains）和
+`{match: exact|contains|regex, text: ...}`。Phase 1 只保存和校验路径，不执行部署；
+`services: {}` 表示尚未学习，不能据截图补全最终发布路径。文件结构：
+
+```yaml
+environment: testa
+entry:
+  command: /menu
+  safe_buttons: []
+services: {}
+```
+
 示例 `/menu` 是待核实入口，先确认真实 Bot 命令；群内必要时用 `/menu@实际Bot用户名`。
 `safe_buttons` 初始为空，`back_button` 初始未配置，没有默认服务映射。
 
@@ -92,10 +111,13 @@ telegram-monitor auth status --json
 ```
 
 `config validate` 不联网、不读取凭据，检查 Phase 1 schema、重复 YAML 键、缺失/未知字段、
-超时、环境名称、目标引用与正则；不验证未来阶段的服务配置或实际 Bot 可达性。
+超时、环境名称、目标引用、空 `menu_path` 与非法正则；不验证实际 Bot 可达性。
+空群 ID 不影响登录状态查询，但会阻止该环境的菜单操作和配置验收。
 省略 `--env` 会检查配置目录内所有非 example 环境文件。
 首次登录顺序为手机号 → Telegram 验证码 → 如有 2FA 则密码，全部隐藏输入、不记录到日志。
-需要交互式终端；成功后保存 `state/telegram.session`，其它命令不会自动触发首次登录。
+需要交互式终端；成功后保存 `data/telegram.session`。已有记录器 session 时，先执行
+`python3 -m app auth status --json`，返回 `authorized: true` 就无需 `auth login`。
+只有缺少 session 或认证失效时才需重新登录；即使主动运行 login，有效 session 也不会再索要验证码。
 
 ## CLI 命令和 Codex 学习流程
 
@@ -103,14 +125,16 @@ telegram-monitor auth status --json
 `watch` 始终输出 JSON Lines。全局 `--verbose` / `--config` 放在命令前。
 
 ```bash
-telegram-monitor inspect --json
-telegram-monitor watch --chat deployment --sender 实际Bot用户名 --json-lines
+telegram-monitor inspect --chat testa --json
+telegram-monitor watch --chat testa --sender ugopsbot --json-lines
 telegram-monitor menu open --env testa --json
 telegram-monitor menu buttons --json
 ```
 
 `inspect` 只读最近 10 条目标 Bot 消息（可用 `--limit` 调整）。watch 观察运行期间的新消息和编辑，
-不指定 `--sender` 时输出群内全部发送者，Ctrl+C 停止。`menu open` 会发送该环境的入口命令。
+不指定 `--sender` 时输出群内全部发送者，Ctrl+C 停止。
+配置多个群时，inspect / watch 需用 `--chat testa` 或 `--chat uat` 明确选择；
+旧配置存在 `deployment` 时保留其默认行为，只有一个群时可省略 `--chat`。`menu open` 会发送该环境的入口命令。
 消息 JSON 含 `chat_id`、`message_id`、`date`、`sender_id`、`sender_username`、`reply_to_msg_id`、
 `text`、`edit_date`、`buttons`；按钮含 `row`、`column`、`text`、`kind`。
 watch 另有 `event`（`message_new` / `message_edited`）；不输出 callback data 或认证信息。
@@ -157,10 +181,10 @@ URL/登录/付款/联系人/位置等非普通导航按钮均返回 `action_not_
 **无 reply 的 Bot 新菜单无法证明属于当前操作者。** 同群/Bot 请串行学习，避免其他人同时操作。
 本阶段过滤不是部署关联，不能据此判定部署成功。watch 不保证补收历史，断开且无法恢复时返回非零。
 
-同一 session 使用本地排他锁，重复 CLI 进程返回 `session_busy`；watch 持续占用 session，
-先停止 watch 再操作菜单。如需同时观察，另建配置目录与独立 session，分别登录。
-不要和旧记录器或外部进程共用正在运行的 session。新 CLI 默认 `state/telegram.session`，
-旧记录器仍用 `data/telegram.session`。锁不协调其他客户端或其他机器。
+默认复用记录器的 `data/telegram.session`，CLI 同时遵守现有 `data/recorder.lock`。
+记录器正在运行时，CLI 返回 `session_busy`；应先正常停止记录器，再运行 CLI，完成后可重新启动记录器。
+watch 同样持续占用 session，先停止 watch 再操作菜单。如需同时观察，另建配置目录与独立 session，
+分别登录，不复制正在运行的 session。锁不协调其他客户端或其他机器。
 状态目录 `0700`、新 session/cursor/lock 文件 `0600`；实际 YAML 和运行状态均被 Git 忽略。
 
 ## 稳定 exit code
@@ -183,8 +207,8 @@ URL/登录/付款/联系人/位置等非普通导航按钮均返回 `action_not_
 ## Phase 1 文件和验证
 
 - `src/telegram_monitor/`：CLI、配置、消息模型、异常、按钮 matcher、菜单业务层、Telethon IO、私有状态。
-- `config/*.example.yaml`：Telegram 配置和 testa / uat 入口骨架，没有真实业务映射。
-- `state/.gitkeep`、`tests/phase1/`：独立状态目录和离线测试。
+- `config.example.yaml`、`testa.example.yaml`、`uat.example.yaml`：共用配置和环境菜单骨架。
+- `data/`：复用 session、锁和菜单 cursor；`tests/phase1/`：离线测试。
 - `pyproject.toml`：安装、命令入口、pytest/Ruff 配置；项目未配置 mypy。
 
 ```bash

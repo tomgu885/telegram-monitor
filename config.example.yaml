@@ -1,5 +1,22 @@
 telegram:
   watch_all: true
+  api_id_env: TELEGRAM_API_ID
+  api_hash_env: TELEGRAM_API_HASH
+  session_file: data/telegram.session
+
+# Fill actual group IDs; null deliberately prevents menu actions until configured.
+targets:
+  testa:
+    chat_id: null
+    bot_username: ugopsbot
+  uat:
+    chat_id: null
+    bot_username: uguatdeploybot
+
+defaults:
+  message_timeout_seconds: 30
+  deploy_timeout_seconds: 900
+  poll_interval_seconds: 1
 
 important:
   chat_ids: [] # e.g. [-1001234567890, -1009876543210]

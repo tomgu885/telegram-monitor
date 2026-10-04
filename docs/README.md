@@ -1,9 +1,12 @@
 # Telegram 本地消息记录器：部署和使用说明
 
 此文档介绍原有 `python -m app` 记录器。新增 `telegram-monitor` Phase 1 菜单学习 CLI 的
-安装、独立 YAML/session、登录、watch 和安全菜单操作请参阅[项目 README](../README.md)。
+安装、共用配置/session、登录、watch 和安全菜单操作请参阅[项目 README](../README.md)。
 安装后也可使用统一入口 `python3 -m app auth login`、`python3 -m app menu ...`；
 不带参数的 `python3 -m app` 和 `--check-config` 仍使用本文的原有记录器配置。
+CLI 也读取根目录 `config.yaml` / `.env` 并复用 `data/telegram.session`，有效 session 不需重新登录。
+发布群 ID 在 `config.yaml` 的 `targets.testa` / `targets.uat`；菜单路径在根目录 `testa.yaml` / `uat.yaml`。
+共用 session 时先停止记录器再运行 CLI，避免 `session_busy`。
 
 Python 3.12+、Telethon MTProto 普通用户账号、SQLite 和本地 JSONL。支持 macOS / Linux，
 使用系统文件锁防止同一个 data 目录被多个进程同时写入。

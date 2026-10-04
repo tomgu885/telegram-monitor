@@ -38,7 +38,7 @@ def emit(payload):
 @app.callback()
 def options(
     ctx: typer.Context,
-    config: Annotated[Path, typer.Option("--config")] = Path("config/telegram.yaml"),
+    config: Annotated[Path, typer.Option("--config")] = Path("config.yaml"),
     verbose: Annotated[bool, typer.Option("--verbose")] = False,
 ):
     ctx.obj = config
@@ -129,15 +129,7 @@ def auth_status(ctx: typer.Context, json_output: Json = False):
 def validate(ctx: typer.Context, env: OptionalEnv = None, json_output: Json = False):
     async def run():
         conf = Configuration(ctx.obj)
-        names = (
-            [env]
-            if env
-            else sorted(
-                path.stem
-                for path in conf.path.parent.glob("*.yaml")
-                if path != conf.path and not path.name.endswith(".example.yaml")
-            )
-        )
+        names = [env] if env else conf.environment_names()
         issues = []
         for name in names:
             try:
@@ -154,7 +146,7 @@ def validate(ctx: typer.Context, env: OptionalEnv = None, json_output: Json = Fa
 @app.command()
 def inspect(
     ctx: typer.Context,
-    chat: Annotated[str, typer.Option("--chat")] = "deployment",
+    chat: Annotated[str | None, typer.Option("--chat")] = None,
     limit: Annotated[int, typer.Option(min=1, max=100)] = 10,
     json_output: Json = False,
 ):
@@ -178,7 +170,7 @@ def inspect(
 @app.command()
 def watch(
     ctx: typer.Context,
-    chat: Annotated[str, typer.Option("--chat")] = "deployment",
+    chat: Annotated[str | None, typer.Option("--chat")] = None,
     sender: Annotated[str | None, typer.Option("--sender")] = None,
     json_lines: Annotated[bool, typer.Option("--json-lines")] = False,
 ):

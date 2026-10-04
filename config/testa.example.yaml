@@ -1,9 +1,0 @@
-# Entry command is an example: verify it with your actual bot before opening.
-environment: testa
-target: deployment
-entry:
-  command: /menu
-  # Add exact button labels ONLY after verifying they are safe navigation.
-  safe_buttons: []
-  # back_button: {match: exact, text: "actual back label"}
-# No service/deployment paths are guessed. Phase 1 only.

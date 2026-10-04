@@ -1,0 +1,7 @@
+environment: testa
+entry:
+  command: /menu
+  safe_buttons: []
+  # back_button: {match: exact, text: "verified back label"}
+# Add only verified service -> menu_path mappings. No path is inferred from screenshots.
+services: {}
