@@ -1,5 +1,8 @@
 # Telegram 本地消息记录器：部署和使用说明
 
+此文档介绍原有 `python -m app` 记录器。新增 `telegram-monitor` Phase 1 菜单学习 CLI 的
+安装、独立 YAML/session、登录、watch 和安全菜单操作请参阅[项目 README](../README.md)。
+
 Python 3.12+、Telethon MTProto 普通用户账号、SQLite 和本地 JSONL。支持 macOS / Linux，
 使用系统文件锁防止同一个 data 目录被多个进程同时写入。
 
@@ -27,7 +30,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-运行时只有 Telethon、python-dotenv、PyYAML 三个直接依赖，不需要 Docker 或外部数据库。
+记录器使用 Telethon、python-dotenv、PyYAML；同仓 CLI 另使用 Typer 和 Pydantic。
+不需要 Docker 或外部数据库。
 
 ### 3. 配置
 

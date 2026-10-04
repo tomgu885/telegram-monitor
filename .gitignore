@@ -12,3 +12,11 @@ __pycache__/
 .coverage
 htmlcov/
 .DS_Store
+config/*.yaml
+!config/*.example.yaml
+state/*
+!state/.gitkeep
+*.egg-info/
+build/
+dist/
+.pytest_cache/

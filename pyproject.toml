@@ -4,3 +4,34 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram-monitor"
+version = "0.1.0"
+description = "Deterministic Telegram bot menu inspection through MTProto"
+requires-python = ">=3.12"
+dependencies = [
+    "Telethon==1.45.0",
+    "python-dotenv>=1.0,<2",
+    "PyYAML>=6.0,<7",
+    "typer>=0.16,<1",
+    "pydantic>=2.10,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.13,<1"]
+
+[project.scripts]
+telegram-monitor = "telegram_monitor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["telegram_monitor*", "app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]

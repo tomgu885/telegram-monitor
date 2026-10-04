@@ -1,0 +1,15 @@
+# Copy to telegram.yaml. All IDs/usernames below are placeholders.
+telegram:
+  api_id_env: TELEGRAM_API_ID
+  api_hash_env: TELEGRAM_API_HASH
+  session_file: state/telegram.session
+
+targets:
+  deployment:
+    chat_id: -1001234567890
+    bot_username: replace_me_bot
+
+defaults:
+  message_timeout_seconds: 30
+  deploy_timeout_seconds: 900
+  poll_interval_seconds: 1

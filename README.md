@@ -1,4 +1,186 @@
-# Telegram 本地消息记录器
+# telegram-monitor
+
+新增 **Phase 1：Telegram Bot 菜单学习 CLI**，使用自己的普通 Telegram 账号、Telethon MTProto、
+Typer 和经过 schema 校验的 YAML。按需求到 Phase 1 停止，仅提供登录、观察消息和安全菜单浏览。
+`deploy`、`deploy-many`、`services`、`service show`、`learn`、部署关联、历史和部署锁留待后续阶段。
+没有猜测任何真实 testa / uat 服务菜单路径，不接入 Jira，不依赖 GUI、截图或 AI。
+
+原有 `python -m app` 消息记录器及截图功能保留，见本文后半部分；两套入口配置和 session 独立。
+
+## CLI 安装和配置
+
+在仓库目录执行，Python 3.12+，支持 macOS / Linux；已有 `.venv` 可直接复用：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[dev]'
+telegram-monitor --help
+```
+
+仅运行时可用 `pip install -e .`；`requirements.txt` 仍供旧记录器使用。
+首次复制示例，已有文件不要覆盖：
+
+```bash
+cp config/telegram.example.yaml config/telegram.yaml
+cp config/testa.example.yaml config/testa.yaml
+cp config/uat.example.yaml config/uat.yaml
+chmod 600 config/telegram.yaml config/testa.yaml config/uat.yaml
+```
+
+从 [my.telegram.org](https://my.telegram.org/) 的 API development tools 获取个人应用 API 信息。
+在项目根目录 `.env` 中填入以下两项（保留其它现有配置），或设置同名环境变量：
+
+```dotenv
+TELEGRAM_API_ID=你的数字API_ID
+TELEGRAM_API_HASH=你的32位API_HASH
+```
+
+环境变量优先于 `.env`；将 `.env` 设为 `0600`。CLI 不要求 `TELEGRAM_PHONE`，登录时会隐藏输入。
+`api_id` 也可直接配置在 YAML；`api_hash` 只通过 `api_hash_env` 指向的变量读取，不写进 YAML。
+
+编辑 `config/telegram.yaml`，填写真实目标（以下均为占位示例）：
+
+```yaml
+telegram:
+  api_id_env: TELEGRAM_API_ID
+  api_hash_env: TELEGRAM_API_HASH
+  session_file: state/telegram.session
+targets:
+  deployment:
+    chat_id: -1001234567890
+    bot_username: replace_me_bot
+defaults:
+  message_timeout_seconds: 30
+  deploy_timeout_seconds: 900
+  poll_interval_seconds: 1
+```
+
+账号必须已加入目标群；群 ID 使用 Telethon 带符号 ID，Bot 用户名可带 `@`。
+Bot 会解析成 ID 并验证 Bot 身份；只操作该群中该 Bot 的消息，不自动猜测目标。
+`deploy_timeout_seconds` 和 `poll_interval_seconds` 为后续阶段预留，本阶段使用事件监听。
+环境 YAML 与主配置同目录；session 和 `.env` 以**配置目录的上一级**为根目录解析。
+在其它工作目录运行时用 `telegram-monitor --config /绝对路径/config/telegram.yaml ...`。
+
+`testa.yaml` / `uat.yaml` 独立设置 `environment`、可选 `target` 和 `entry`。
+示例 `/menu` 是待核实入口，先确认真实 Bot 命令；群内必要时用 `/menu@实际Bot用户名`。
+`safe_buttons` 初始为空，`back_button` 初始未配置，没有默认服务映射。
+
+```bash
+telegram-monitor config validate
+telegram-monitor config validate --env testa --json
+telegram-monitor auth login
+telegram-monitor auth status --json
+```
+
+`config validate` 不联网、不读取凭据，检查 Phase 1 schema、重复 YAML 键、缺失/未知字段、
+超时、环境名称、目标引用与正则；不验证未来阶段的服务配置或实际 Bot 可达性。
+省略 `--env` 会检查配置目录内所有非 example 环境文件。
+首次登录顺序为手机号 → Telegram 验证码 → 如有 2FA 则密码，全部隐藏输入、不记录到日志。
+需要交互式终端；成功后保存 `state/telegram.session`，其它命令不会自动触发首次登录。
+
+## CLI 命令和 Codex 学习流程
+
+操作结果始终为 stdout JSON，`--json` 保留为显式机器接口；日志和提示走 stderr。
+`watch` 始终输出 JSON Lines。全局 `--verbose` / `--config` 放在命令前。
+
+```bash
+telegram-monitor inspect --json
+telegram-monitor watch --chat deployment --sender 实际Bot用户名 --json-lines
+telegram-monitor menu open --env testa --json
+telegram-monitor menu buttons --json
+```
+
+`inspect` 只读最近 10 条目标 Bot 消息（可用 `--limit` 调整）。watch 观察运行期间的新消息和编辑，
+不指定 `--sender` 时输出群内全部发送者，Ctrl+C 停止。`menu open` 会发送该环境的入口命令。
+消息 JSON 含 `chat_id`、`message_id`、`date`、`sender_id`、`sender_username`、`reply_to_msg_id`、
+`text`、`edit_date`、`buttons`；按钮含 `row`、`column`、`text`、`kind`。
+watch 另有 `event`（`message_new` / `message_edited`）；不输出 callback data 或认证信息。
+
+Codex 查看真实标签，确认某按钮仅用于浏览后，将其完整标签（包含 emoji）写入该环境的
+`entry.safe_buttons`，重新 `config validate --env testa`，再逐层点击：
+
+```bash
+telegram-monitor menu click --text '实际导航标签' --json
+telegram-monitor menu click --index 0 --json
+telegram-monitor menu click --message-id 18273 --text '实际导航标签' --match exact --json
+telegram-monitor menu click --text '^实际标签$' --match regex --json
+telegram-monitor menu buttons --message-id 18274 --env testa --json
+telegram-monitor menu back --json
+telegram-monitor menu reset --env testa --json
+```
+
+上述 ID/标签仅演示语法，不能当作真实菜单。`--text` 默认 contains，也支持 exact / regex；
+`--index` 从 0 开始按行展开；文本和 index 二选一。匹配多处返回 `unexpected_menu`，不会猜测。
+`back` 需配置 `entry.back_button: {match: exact, text: 实际返回标签}`，并把完整标签加入
+`safe_buttons`；`reset` 重新发送入口命令，不点击“重置”按钮。
+点击结果为 `{"status":"ok","clicked":"实际标签","next_message":{...}}`。
+
+菜单 cursor 持久化在 session 目录，后续命令可省略环境/message ID；切换环境时先重新 open，
+或明确指定环境和 message ID。更换群/Bot 后旧 cursor 被拒绝。`buttons` 重新获取并刷新当前消息；
+上次观察后菜单变化会阻止直接 click。点击 RPC 前再次核对文字、按钮及 callback 摘要。
+
+**Phase 1 无危险动作开关。** 非允许列表标签、发布/部署/删除/回滚/重启/确认等危险标签、
+URL/登录/付款/联系人/位置等非普通导航按钮均返回 `action_not_allowed`；危险标签加入允许列表也不点击。
+只信任已核实行为的 Bot：标签允许列表无法证明 Bot 后端没有副作用。遇到未知行为就停下核实。
+点击前 stderr 记录环境、service（本阶段为 `-`）、message ID 与转义后的按钮文字。
+
+收到 `button_not_found` / `menu_not_found` / `unexpected_menu`，先 `inspect` / `menu open` /
+`menu buttons` 观察真实菜单，核实配置并 validate，不先修改代码、不猜测其它服务按钮。
+
+## 等待、并发和边界
+
+动作前注册新消息和编辑监听，支持 Bot 编辑原菜单；过滤群、Bot ID、旧消息 ID/时间及明确指向
+其它消息的 reply。等待只接受包含按钮的菜单；仅 callback 提示、无新菜单或菜单未变化时超时。
+超时返回 `menu_not_found`，附带 `action_may_have_completed: true`：动作可能已经执行，不自动重试。
+点击尝试后旧 cursor 清除，失败时先 inspect 查看实际状态。限流直接返回等待秒数，不静默重试点击。
+按钮 API 参考 [Telethon Message.click](https://docs.telethon.dev/en/stable/modules/custom.html#telethon.tl.custom.message.Message.click)。
+
+**无 reply 的 Bot 新菜单无法证明属于当前操作者。** 同群/Bot 请串行学习，避免其他人同时操作。
+本阶段过滤不是部署关联，不能据此判定部署成功。watch 不保证补收历史，断开且无法恢复时返回非零。
+
+同一 session 使用本地排他锁，重复 CLI 进程返回 `session_busy`；watch 持续占用 session，
+先停止 watch 再操作菜单。如需同时观察，另建配置目录与独立 session，分别登录。
+不要和旧记录器或外部进程共用正在运行的 session。新 CLI 默认 `state/telegram.session`，
+旧记录器仍用 `data/telegram.session`。锁不协调其他客户端或其他机器。
+状态目录 `0700`、新 session/cursor/lock 文件 `0600`；实际 YAML 和运行状态均被 Git 忽略。
+
+## 稳定 exit code
+
+| Exit | error / 含义 |
+| --- | --- |
+| 0 | 成功，`status: ok` |
+| 2 | CLI 语法错误，Typer 使用说明走 stderr |
+| 10 / 11 / 12 | 预留 deployment_failed / deploy_timeout / deployment_already_running |
+| 20 / 21 / 22 | environment_not_found / 预留 service_not_found / invalid_config |
+| 30 / 31 / 32 | menu_not_found / button_not_found / unexpected_menu |
+| 33 | action_not_allowed |
+| 40 / 41 / 42 | telegram_connection_error / telegram_auth_error / telegram_rate_limit |
+| 43 | session_busy |
+| 50 | internal_error |
+| 130 | Ctrl+C 或 SIGTERM 中断，`status: interrupted` |
+
+错误 JSON 为 `{"status":"error","error":"稳定名称",...}`，不输出底层异常正文或凭据。
+
+## Phase 1 文件和验证
+
+- `src/telegram_monitor/`：CLI、配置、消息模型、异常、按钮 matcher、菜单业务层、Telethon IO、私有状态。
+- `config/*.example.yaml`：Telegram 配置和 testa / uat 入口骨架，没有真实业务映射。
+- `state/.gitkeep`、`tests/phase1/`：独立状态目录和离线测试。
+- `pyproject.toml`：安装、命令入口、pytest/Ruff 配置；项目未配置 mypy。
+
+```bash
+python -m pytest -q
+ruff check app src tests
+ruff format --check app src tests
+```
+
+测试全部 mock Telegram，覆盖 schema、匹配/安全、菜单状态、新消息/编辑、竞态、无关消息过滤、
+超时清理、登录/2FA、JSON/exit code 和 session 锁；不读取真实凭据，不发送群消息。
+真实验收需配置目标后完成 `auth status → menu open → buttons → 安全导航 click`，再观察 watch。
+未执行此流程就不代表验证过真实 testa / uat 菜单，不进入部署阶段。
+
+## 原有 Telegram 本地消息记录器
 
 Python 3.12+、Telethon MTProto 普通用户账号、SQLite 和本地 JSONL。支持 macOS / Linux，
 使用系统文件锁防止同一个 data 目录被多个进程同时写入。
@@ -25,7 +207,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-运行时只有 Telethon、python-dotenv、PyYAML 三个直接依赖，不需要 Docker 或外部数据库。
+记录器使用 Telethon、python-dotenv、PyYAML；同仓 CLI 另使用 Typer 和 Pydantic。
+不需要 Docker 或外部数据库。
 
 ### 3. 配置
 
