@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from telethon import errors
 
 from telegram_monitor.config import ButtonMatch, Configuration
+from telegram_monitor.deployer import deploy as deploy_service
 from telegram_monitor.exceptions import MonitorError
 from telegram_monitor.menu import Menu
 from telegram_monitor.state import CursorStore
@@ -67,7 +68,11 @@ def execute(operation):
         result = asyncio.run(interruptible(operation))
         if result is not None:
             emit(result)
+            if result.get("status") in {"failed", "timeout"}:
+                raise typer.Exit(10 if result["status"] == "failed" else 11)
         return
+    except typer.Exit:
+        raise
     except MonitorError as exc:
         error = exc
     except errors.FloodWaitError as exc:
@@ -252,6 +257,24 @@ def menu_back(
     json_output: Json = False,
 ):
     menu_operation(ctx, env, "back", message_id=message_id)
+
+
+@app.command("deploy")
+def deploy_command(
+    ctx: typer.Context,
+    env: Env,
+    service: Annotated[str, typer.Option("--service")],
+    json_output: Json = False,
+):
+    async def run():
+        conf = Configuration(ctx.obj)
+        environment = conf.environment(env)
+        async with connect(conf) as client:
+            adapter = TelethonMenuClient(client, conf.target(environment.target))
+            await adapter.initialize()
+            return await deploy_service(conf, adapter, env, service)
+
+    execute(run)
 
 
 def main():

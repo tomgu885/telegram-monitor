@@ -1,1 +1,1 @@
-"""Phase 1: a scriptable, conservative Telegram menu inspection interface."""
+"""Scriptable Telegram menu inspection and explicitly requested service deployment."""

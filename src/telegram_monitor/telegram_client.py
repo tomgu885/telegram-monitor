@@ -237,19 +237,26 @@ class TelethonMenuClient:
 
     async def click_button(self, message: Message, button: Button, wait_seconds: float) -> Message:
         async def click():
-            raw = await self.client.get_messages(self.peer, ids=message.message_id)
-            if raw is None or not self.matches(raw):
-                raise MonitorError("unexpected_menu", reason="menu_disappeared")
-            current = snapshot(raw, self.bot.username)
-            if current.revision != message.revision or button not in current.buttons:
-                raise MonitorError("unexpected_menu", reason="menu_changed_before_click")
-            if button.kind not in {"keyboard", "callback"}:
-                raise MonitorError("action_not_allowed", reason="unsupported_button_type")
-            result = await raw.click(i=button.row, j=button.column)
-            # A reply-keyboard click sends a text message; callback answers are not messages.
-            return result.id if isinstance(result, types.Message) else None
+            return await self.trigger_button(message, button)
 
         return await self.transition(click, wait_seconds, source=message)
+
+    async def latest_message_id(self) -> int:
+        messages = await self.client.get_messages(self.peer, limit=1)
+        return messages[0].id if messages else 0
+
+    async def trigger_button(self, message: Message, button: Button) -> int | None:
+        """Exactly one RPC attempt; caller must subscribe to results before calling."""
+        raw = await self.client.get_messages(self.peer, ids=message.message_id)
+        if raw is None or not self.matches(raw):
+            raise MonitorError("unexpected_menu", reason="menu_disappeared")
+        current = snapshot(raw, self.bot.username)
+        if current.revision != message.revision or button not in current.buttons:
+            raise MonitorError("unexpected_menu", reason="menu_changed_before_click")
+        if button.kind not in {"keyboard", "callback"}:
+            raise MonitorError("action_not_allowed", reason="unsupported_button_type")
+        result = await raw.click(i=button.row, j=button.column)
+        return result.id if isinstance(result, types.Message) else None
 
     async def watch(self, emit, sender: str | None = None):
         sender_entity = await self.client.get_entity(sender) if sender else None

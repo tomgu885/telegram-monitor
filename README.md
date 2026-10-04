@@ -1,9 +1,9 @@
 # telegram-monitor
 
-新增 **Phase 1：Telegram Bot 菜单学习 CLI**，使用自己的普通 Telegram 账号、Telethon MTProto、
-Typer 和经过 schema 校验的 YAML。按需求到 Phase 1 停止，仅提供登录、观察消息和安全菜单浏览。
-`deploy`、`deploy-many`、`services`、`service show`、`learn`、部署关联、历史和部署锁留待后续阶段。
-没有猜测任何真实 testa / uat 服务菜单路径，不接入 Jira，不依赖 GUI、截图或 AI。
+Telegram Bot 菜单学习 CLI，使用自己的普通 Telegram 账号、Telethon MTProto、Typer 和严格 YAML。
+提供登录、观察消息、安全菜单浏览，以及按已核实路径执行的单服务 `deploy`。
+`deploy-many`、`services`、`service show` 和自动 `learn` 留待后续阶段；当前由 Codex 通过 CLI 逐层学习。
+不接入 Jira，不依赖 GUI、截图或 AI 运行部署；实际环境路径保存在本机环境 YAML。
 
 原有 `python -m app` 消息记录器及截图功能保留，见本文后半部分。两个入口共用根目录
 `config.yaml`、`.env` 和 `data/telegram.session`；有效 session 不需要重复登录。
@@ -89,7 +89,7 @@ Bot 会解析成 ID 并验证 Bot 身份；只操作该群中该 Bot 的消息�
 根目录 `testa.yaml` / `uat.yaml` 设置 `environment`、`entry` 和 `services`。
 默认引用 `targets` 中与环境同名的群，也可用 `target` 显式指定；群 ID 不放在菜单文件。
 每个服务的完整 `menu_path` 也放在对应环境文件，支持字符串（默认 contains）和
-`{match: exact|contains|regex, text: ...}`。Phase 1 只保存和校验路径，不执行部署；
+`{match: exact|contains|regex, text: ...}`。普通菜单命令只浏览，显式 `deploy` 才执行最终发布按钮；
 `services: {}` 表示尚未学习，不能据截图补全最终发布路径。文件结构：
 
 ```yaml
@@ -110,7 +110,7 @@ telegram-monitor auth login
 telegram-monitor auth status --json
 ```
 
-`config validate` 不联网、不读取凭据，检查 Phase 1 schema、重复 YAML 键、缺失/未知字段、
+`config validate` 不联网、不读取凭据，检查 schema、重复 YAML 键、缺失/未知字段、
 超时、环境名称、目标引用、空 `menu_path` 与非法正则；不验证实际 Bot 可达性。
 空群 ID 不影响登录状态查询，但会阻止该环境的菜单操作和配置验收。
 省略 `--env` 会检查配置目录内所有非 example 环境文件。
@@ -162,13 +162,60 @@ telegram-monitor menu reset --env testa --json
 或明确指定环境和 message ID。更换群/Bot 后旧 cursor 被拒绝。`buttons` 重新获取并刷新当前消息；
 上次观察后菜单变化会阻止直接 click。点击 RPC 前再次核对文字、按钮及 callback 摘要。
 
-**Phase 1 无危险动作开关。** 非允许列表标签、发布/部署/删除/回滚/重启/确认等危险标签、
+**普通 menu click 无危险动作开关。** 非允许列表标签、发布/部署/删除/回滚/重启/确认等危险标签、
 URL/登录/付款/联系人/位置等非普通导航按钮均返回 `action_not_allowed`；危险标签加入允许列表也不点击。
 只信任已核实行为的 Bot：标签允许列表无法证明 Bot 后端没有副作用。遇到未知行为就停下核实。
-点击前 stderr 记录环境、service（本阶段为 `-`）、message ID 与转义后的按钮文字。
+点击前 stderr 记录环境、service（普通菜单浏览为 `-`）、message ID 与转义后的按钮文字。
 
 收到 `button_not_found` / `menu_not_found` / `unexpected_menu`，先 `inspect` / `menu open` /
 `menu buttons` 观察真实菜单，核实配置并 validate，不先修改代码、不猜测其它服务按钮。
+
+## 已核实路径的单服务部署
+
+```bash
+python3 -m app deploy --env testa --service payment-rpc --json
+```
+
+此命令会真实发布，须有该环境/服务的操作授权。读取本机 `testa.yaml` 中的
+`services.payment-rpc.menu_path`，从入口重放导航，最后点击精确匹配的发布按钮。
+前面的每一步仍须属于 `entry.safe_buttons`；最后一步必须 `match: exact`，并拒绝删除、回滚、
+重启和批量动作。发布前，页面必须包含 `services.payment-rpc.expected_context` 的全部文字，
+用它锁定服务、分支和环境；缺少上下文、按钮歧义或菜单变化都停止，不猜测、不重试发布动作。
+支持用服务的 `aliases` 解析名称；尚未核实的 uat 或其他服务不能直接部署。
+
+在同一个环境 YAML 配置完成规则，结构示例（菜单和通知文字必须按真实 Bot 核实）：
+
+```yaml
+deployment_result:
+  sender_username: your_deploy_bot
+  timeout_seconds: 900
+  success:
+    contains: ["部署成功"]
+  failure:
+    contains: ["部署失败", "FAILURE", "ABORTED"]
+  correlation:
+    payment-rpc:
+      service_patterns:
+        - '(?m)^服务: payment-rpc$'
+      key_patterns:
+        build_id: '构建号: (?P<value>\d+)'
+```
+
+success / failure 均支持 `contains` 和 `regex`，至少一个非空规则；failure 优先，避免把含有
+“完成时间”的失败通知判作成功。关联必须满足群、Bot、触发前最后消息 ID 和开始时间过滤，
+并匹配当前服务、已知 reply 链或已绑定的构建标识。Bot 编辑原菜单时可以提供构建标识，
+但旧消息不能作为完成结果；捕获构建标识后，其他构建不能满足本次等待。
+同一服务无 reply、无构建标识的并行外部部署仍无法绝对区分，应串行操作该 Bot。
+
+发布前订阅消息，最终通知无需按钮。回调超时继续等待，绝不自动重复点击；缺少终态超时返回
+`status: timeout` / exit 11，不代表 Bot 没有执行。需要额外确认时停止并返回当前菜单，交给操作者
+核实流程。异常或中断可能已经触发发布，先 inspect / 查 Jenkins，不直接重新 deploy。
+成功返回 `status: success` / exit 0，失败返回 `status: failed` / exit 10；JSON 包含服务、时间、
+耗时、触发与结果消息 ID、完整结果文字、命中规则以及 correlation_keys。
+
+`data/deploy-history.jsonl` 保存触发意图和终态；异常时保存 `unknown`，不保存认证信息。
+复用现有 session/recorder 排他锁，当前同 session 的所有部署串行；并发 CLI 返回 exit 43。
+不实现跨机器锁、自动重试、取消 Jenkins 或部署后业务验收。
 
 ## 等待、并发和边界
 
@@ -179,7 +226,7 @@ URL/登录/付款/联系人/位置等非普通导航按钮均返回 `action_not_
 按钮 API 参考 [Telethon Message.click](https://docs.telethon.dev/en/stable/modules/custom.html#telethon.tl.custom.message.Message.click)。
 
 **无 reply 的 Bot 新菜单无法证明属于当前操作者。** 同群/Bot 请串行学习，避免其他人同时操作。
-本阶段过滤不是部署关联，不能据此判定部署成功。watch 不保证补收历史，断开且无法恢复时返回非零。
+菜单浏览过滤不等于上述部署关联，不能单凭菜单响应判定部署成功。watch 不保证补收历史。
 
 默认复用记录器的 `data/telegram.session`，CLI 同时遵守现有 `data/recorder.lock`。
 记录器正在运行时，CLI 返回 `session_busy`；应先正常停止记录器，再运行 CLI，完成后可重新启动记录器。
@@ -191,10 +238,10 @@ watch 同样持续占用 session，先停止 watch 再操作菜单。如需同�
 
 | Exit | error / 含义 |
 | --- | --- |
-| 0 | 成功，`status: ok` |
+| 0 | 成功，`status: ok`；部署为 `status: success` |
 | 2 | CLI 语法错误，Typer 使用说明走 stderr |
-| 10 / 11 / 12 | 预留 deployment_failed / deploy_timeout / deployment_already_running |
-| 20 / 21 / 22 | environment_not_found / 预留 service_not_found / invalid_config |
+| 10 / 11 / 12 | deployment_failed / deploy_timeout / 预留 deployment_already_running |
+| 20 / 21 / 22 | environment_not_found / service_not_found / invalid_config |
 | 30 / 31 / 32 | menu_not_found / button_not_found / unexpected_menu |
 | 33 | action_not_allowed |
 | 40 / 41 / 42 | telegram_connection_error / telegram_auth_error / telegram_rate_limit |
@@ -204,9 +251,10 @@ watch 同样持续占用 session，先停止 watch 再操作菜单。如需同�
 
 错误 JSON 为 `{"status":"error","error":"稳定名称",...}`，不输出底层异常正文或凭据。
 
-## Phase 1 文件和验证
+## 文件和验证
 
 - `src/telegram_monitor/`：CLI、配置、消息模型、异常、按钮 matcher、菜单业务层、Telethon IO、私有状态。
+- `deployer.py` / `watcher.py`：单服务部署、结果关联、超时和历史。
 - `config.example.yaml`、`testa.example.yaml`、`uat.example.yaml`：共用配置和环境菜单骨架。
 - `data/`：复用 session、锁和菜单 cursor；`tests/phase1/`：离线测试。
 - `pyproject.toml`：安装、命令入口、pytest/Ruff 配置；项目未配置 mypy。
@@ -220,7 +268,7 @@ ruff format --check app src tests
 测试全部 mock Telegram，覆盖 schema、匹配/安全、菜单状态、新消息/编辑、竞态、无关消息过滤、
 超时清理、登录/2FA、JSON/exit code 和 session 锁；不读取真实凭据，不发送群消息。
 真实验收需配置目标后完成 `auth status → menu open → buttons → 安全导航 click`，再观察 watch。
-未执行此流程就不代表验证过真实 testa / uat 菜单，不进入部署阶段。
+只有核实该环境的完整路径和结果格式后，才可以在获得授权时执行 deploy；不能用 testa 的验证代替 uat。
 
 ## 原有 Telegram 本地消息记录器
 

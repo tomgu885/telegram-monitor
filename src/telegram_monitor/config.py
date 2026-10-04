@@ -104,6 +104,14 @@ class Entry(Schema):
 class Service(Schema):
     aliases: list[str] = Field(default_factory=list)
     menu_path: list[ButtonMatch] = Field(min_length=1)
+    expected_context: list[str] = Field(default_factory=list)
+
+    @field_validator("expected_context")
+    @classmethod
+    def nonempty_context(cls, value):
+        if any(not item.strip() for item in value):
+            raise ValueError("empty deployment context")
+        return value
 
     @field_validator("menu_path", mode="before")
     @classmethod
@@ -113,12 +121,58 @@ class Service(Schema):
         return value
 
 
+class Patterns(Schema):
+    contains: list[str] = Field(default_factory=list)
+    regex: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid(self):
+        if not self.contains and not self.regex:
+            raise ValueError("at least one pattern required")
+        if any(not item.strip() for item in [*self.contains, *self.regex]):
+            raise ValueError("empty pattern")
+        try:
+            for pattern in self.regex:
+                re.compile(pattern)
+        except re.error:
+            raise ValueError("invalid result regex") from None
+        return self
+
+
+class Correlation(Schema):
+    service_patterns: list[str] = Field(min_length=1)
+    key_patterns: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def valid(self):
+        try:
+            for pattern in self.service_patterns:
+                if not pattern.strip():
+                    raise ValueError("empty service pattern")
+                re.compile(pattern)
+            for pattern in self.key_patterns.values():
+                if "value" not in re.compile(pattern).groupindex:
+                    raise ValueError("correlation key needs a named value group")
+        except re.error:
+            raise ValueError("invalid correlation regex") from None
+        return self
+
+
+class DeploymentResult(Schema):
+    sender_username: str = Field(pattern=USERNAME)
+    success: Patterns
+    failure: Patterns
+    correlation: dict[str, Correlation] = Field(min_length=1)
+    timeout_seconds: PositiveSeconds = 900
+
+
 class Environment(Schema):
     environment: str = Field(pattern=NAME.pattern)
     target: str | None = None
     entry: Entry
-    # Stored and validated in Phase 1; no automatic deployment is executed.
+    # Menu inspection never executes these paths; only explicit deploy does.
     services: dict[str, Service] = Field(default_factory=dict)
+    deployment_result: DeploymentResult | None = None
 
 
 class UniqueLoader(yaml.SafeLoader):

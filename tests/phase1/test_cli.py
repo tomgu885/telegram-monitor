@@ -134,3 +134,20 @@ def test_menu_environment_selects_its_own_group(configuration, monkeypatch):
         result = invoke(configuration, "menu", "open", "--env", env)
         assert result.exit_code == 0
     assert seen == [-100123, -456]
+
+
+@pytest.mark.parametrize(("status", "code"), [("success", 0), ("failed", 10), ("timeout", 11)])
+def test_deploy_emits_one_json_result_with_stable_exit(configuration, monkeypatch, status, code):
+    @asynccontextmanager
+    async def fake_connect(*args, **kwargs):
+        yield object()
+
+    monkeypatch.setattr("telegram_monitor.cli.connect", fake_connect)
+    monkeypatch.setattr("telegram_monitor.cli.TelethonMenuClient", lambda *args: AsyncMock())
+    operation = AsyncMock(return_value={"status": status, "service": "payment-rpc"})
+    monkeypatch.setattr("telegram_monitor.cli.deploy_service", operation)
+    result = invoke(configuration, "deploy", "--env", "testa", "--service", "payment-rpc", "--json")
+    assert result.exit_code == code
+    assert json.loads(result.stdout)["status"] == status
+    assert len(result.stdout.splitlines()) == 1
+    operation.assert_awaited_once()
