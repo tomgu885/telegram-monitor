@@ -7,6 +7,24 @@ Typer 和经过 schema 校验的 YAML。按需求到 Phase 1 停止，仅提供�
 
 原有 `python -m app` 消息记录器及截图功能保留，见本文后半部分；两套入口配置和 session 独立。
 
+也可以统一使用 `python3 -m app` 入口，安装后在项目目录运行：
+
+```bash
+python3 -m app                          # 不带参数：启动原有消息记录器
+python3 -m app --check-config           # 检查原有记录器配置
+python3 -m app --help                   # 查看新 CLI 命令
+python3 -m app auth login               # 新 CLI 首次登录
+python3 -m app auth status --json
+python3 -m app menu open --env testa --json
+python3 -m app menu buttons --json
+python3 -m app watch --chat deployment --sender 实际Bot用户名 --json-lines
+```
+
+本文所有 `telegram-monitor ...` 均可等价改写为 `python3 -m app ...` 或
+`python3 -m telegram_monitor ...`。不带参数的 `python3 -m app` 保留原有启动行为，
+使用原有 `config.yaml` / `data/telegram.session`；子命令使用新 CLI 的
+`config/telegram.yaml` / `state/telegram.session`，不会自动切换或共用旧 session。
+
 ## CLI 安装和配置
 
 在仓库目录执行，Python 3.12+，支持 macOS / Linux；已有 `.venv` 可直接复用：
@@ -384,7 +402,7 @@ iTerm 或 Ghostty；以后封装为 app 时给对应 app 授权。按系统提�
 telegram-monitor/
 ├── app/
 │   ├── __init__.py
-│   ├── __main__.py          # 启动、单实例锁、最终归档与关闭
+│   ├── __main__.py          # 统一入口：CLI 子命令分发；原有记录器启动与关闭
 │   ├── config.py            # .env/YAML 读取、校验、OR 匹配
 │   ├── telegram_client.py   # 登录、新消息/编辑/删除监听、重连、信号
 │   ├── screenshot.py        # 固定主显示器截图、临时文件清理

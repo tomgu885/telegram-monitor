@@ -28,7 +28,7 @@ def instance_lock(data_dir: Path):
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def main() -> int:
+def recorder_main() -> int:
     os.umask(0o077)
     setup_logging()
     parser = argparse.ArgumentParser(description="Local Telegram recorder with opt-in screenshots")
@@ -68,6 +68,18 @@ def main() -> int:
         log_failure("Recorder stopped due to an unrecoverable error", exc)
         result = 1
     return result
+
+
+def main() -> int:
+    # Preserve the recorder's existing startup and configuration check. All new
+    # subcommands/options use the same CLI as `python -m telegram_monitor`.
+    if len(sys.argv) == 1 or sys.argv[1] == "--check-config":
+        return recorder_main()
+
+    from telegram_monitor.cli import main as cli_main
+
+    cli_main()
+    return 0
 
 
 if __name__ == "__main__":

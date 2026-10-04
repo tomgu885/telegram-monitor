@@ -2,6 +2,8 @@
 
 此文档介绍原有 `python -m app` 记录器。新增 `telegram-monitor` Phase 1 菜单学习 CLI 的
 安装、独立 YAML/session、登录、watch 和安全菜单操作请参阅[项目 README](../README.md)。
+安装后也可使用统一入口 `python3 -m app auth login`、`python3 -m app menu ...`；
+不带参数的 `python3 -m app` 和 `--check-config` 仍使用本文的原有记录器配置。
 
 Python 3.12+、Telethon MTProto 普通用户账号、SQLite 和本地 JSONL。支持 macOS / Linux，
 使用系统文件锁防止同一个 data 目录被多个进程同时写入。
