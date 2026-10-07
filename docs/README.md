@@ -12,7 +12,7 @@ Python 3.12+、Telethon MTProto 普通用户账号、SQLite 和本地 JSONL。�
 使用系统文件锁防止同一个 data 目录被多个进程同时写入。
 
 默认被动记录 Telegram 下发的新消息、编辑和可识别的删除事件。可在 macOS 27 上显式启用
-授权用户请求主显示器截图，并用当前账号私聊返回 PNG。没有 Bot API、Codex/OpenAI 调用
+授权用户请求主显示器截图，并用当前账号私聊返回图片消息。没有 Bot API、Codex/OpenAI 调用
 或语义判断；不转发、reaction、标记已读，也不下载媒体或递归获取被回复的消息。
 
 ## 安装与启动
@@ -209,8 +209,10 @@ screenshot:
   不发到群内，也不把群消息 ID 用作私聊回复 ID。广播频道不支持触发。
 - 同一 sender 默认 5 秒内最多一次，使用单调时钟，排队后的执行也检查冷却。
   全局锁覆盖截图、上传和清理，多个请求依次执行。冷却状态保存在内存，重启后重置。
-- 私聊通过 `event.respond(file=..., reply_to=event.id, force_document=True)` 发送原始 PNG
-  文件，不附带机器名、用户名、完整本地路径或额外 caption。
+- 私聊通过 `event.respond(file=..., reply_to=event.id, force_document=False)` 发送图片消息，
+  可在聊天中直接预览；群聊触发后的私发同样使用图片消息。图片可能被 Telegram 压缩，
+  不保证保留原始 PNG 格式和画质。本地仍生成临时 PNG，发送后清理。
+  不附带机器名、用户名、完整本地路径或额外 caption。
   [Telethon 文件发送参数](https://docs.telethon.dev/en/stable/modules/client.html#telethon.client.uploads.UploadMethods.send_file)。
 - 请求先写入 SQLite 和持久化 JSONL outbox，然后启动截图任务；JSONL 继续由后台归档。
   命中 `important` 的请求还会进入 important archive。即使 `watch_all: false`，符合截图
@@ -244,13 +246,13 @@ iTerm 或 Ghostty；以后封装为 app 时给对应 app 授权。按系统提�
 在运行目录执行 `python3 -m app --check-config`，再执行 `python3 -m app`。
 配置修改后需要重启。先使用无敏感内容的测试桌面：
 
-1. 授权用户私聊发 `截图`，应在原私聊收到回复该消息的 PNG；超过 5 秒再发 `screenshot`
+1. 授权用户私聊发 `截图`，应在原私聊收到回复该消息的图片预览（非文件附件）；超过 5 秒再发 `screenshot`
    也应成功。发送后检查 `data/screenshots` 无残留 PNG。
 2. 未授权用户私聊发 `截图`，应无截图、无任何回复；日志可见 ignored metadata。
 3. 授权用户在群内发 `截图`（`allow_groups: false`），应无截图或回复。
 4. 同一用户在 5 秒内连续请求，第二次应静默忽略；普通文字不触发。
 5. 连接多个显示器，使用扩展桌面，在主屏和副屏各放不同的测试标记。
-   请求截图，确认 PNG 只有主屏内容，没有副屏标记或多屏拼接。
+   请求截图，确认图片只有主屏内容，没有副屏标记或多屏拼接。
 6. 配置授权用户同时命中 `important.user_ids`，确认请求存在于 SQLite、普通 JSONL
    与 important JSONL；截图失败也应留下请求记录。
 

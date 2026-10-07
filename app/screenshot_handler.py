@@ -84,11 +84,11 @@ class ScreenshotHandler:
                 logger.info("[SCREENSHOT] captured path=<redacted> size=%s", path.stat().st_size)
                 async with asyncio.timeout(60):
                     if event.is_private:
-                        await event.respond(file=str(path), reply_to=event.id, force_document=True)
+                        await event.respond(file=str(path), reply_to=event.id, force_document=False)
                     else:
                         # Opt-in group commands still return the image ONLY to the sender.
                         await event.client.send_file(
-                            await event.get_input_sender(), str(path), force_document=True
+                            await event.get_input_sender(), str(path), force_document=False
                         )
                 logger.info("[SCREENSHOT] sent sender=%s", sender)
             except Exception as exc:
