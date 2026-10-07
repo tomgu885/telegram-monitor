@@ -129,7 +129,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
                 incoming.respond.assert_awaited_once()
                 args = incoming.respond.call_args.kwargs
                 self.assertEqual(args["reply_to"], 7)
-                self.assertTrue(args["force_document"])
+                self.assertFalse(args["force_document"])
                 self.assertEqual(set(args), {"file", "reply_to", "force_document"})
                 self.assertEqual(Path(args["file"]).parent, self.directory)
                 incoming.client.send_file.assert_not_called()
@@ -180,6 +180,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         incoming.client.send_file.assert_awaited_once()
         self.assertEqual(incoming.client.send_file.call_args.args[0], 42)
         self.assertNotIn("reply_to", incoming.client.send_file.call_args.kwargs)
+        self.assertFalse(incoming.client.send_file.call_args.kwargs["force_document"])
         self.assert_clean()
 
     async def test_cooldown_and_expiry(self):
