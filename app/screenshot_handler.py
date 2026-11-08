@@ -20,11 +20,16 @@ class ScreenshotHandler:
         self._tasks: set[asyncio.Task] = set()
 
     def accepts(self, event) -> bool:
-        if not self.settings.enabled or getattr(event.message, "out", False):
+        if not self.settings.enabled:
             return False
         if (event.raw_text or "").strip().lower() not in self.settings.commands:
             return False
         sender = event.sender_id
+        if getattr(event.message, "out", False):
+            # Telethon can omit sender_id on outgoing messages, including Saved Messages.
+            sender = event.client._self_id
+            if sender is None or not event.is_private or event.chat_id != sender:
+                return False
         if type(sender) is not int or sender <= 0 or sender not in self.settings.screenshot_uids:
             logger.info("[SCREENSHOT] command ignored from unauthorized sender=%s", sender)
             return False
@@ -48,7 +53,7 @@ class ScreenshotHandler:
     async def handle(self, event) -> None:
         if not self.accepts(event):
             return
-        sender = event.sender_id
+        sender = event.chat_id if event.is_private else event.sender_id
         now = monotonic()
         previous = self._last_request.get(sender)
         if previous is not None and now - previous < self.settings.cooldown_seconds:

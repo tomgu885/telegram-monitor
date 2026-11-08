@@ -29,7 +29,7 @@ def request(sender=42, text="截图", private=True, message_id=7, **kwargs):
     result.is_private = private
     result.is_group = not private
     result.respond = AsyncMock()
-    result.client = SimpleNamespace(send_file=AsyncMock())
+    result.client = SimpleNamespace(_self_id=42, send_file=AsyncMock())
     result.get_input_sender = AsyncMock(return_value=sender)
     return result
 
@@ -145,11 +145,35 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
             request(text="帮我截图一下"),
             request(text="please screenshot"),
             request(private=False),
-            request(out=True),
+            request(sender=43, out=True),
         ):
             await self.handler.handle(incoming)
             incoming.respond.assert_not_called()
             incoming.client.send_file.assert_not_called()
+        self.run.assert_not_called()
+
+    async def test_saved_messages_reply_when_outgoing_sender_is_omitted(self):
+        store = Storage(Path(self.temp.name))
+        self.addCleanup(store.close)
+        recorder = Recorder(settings(watch_all=False, screenshot=self.config), store)
+        self.addAsyncCleanup(recorder.screenshots.close)
+        incoming = request(sender=None, out=True)
+        incoming.chat_id = 42
+        await recorder.message(incoming, "message_new")
+        await asyncio.gather(*recorder.screenshots._tasks)
+        self.assertEqual(store.get(42, incoming.id)["text"], "截图")
+        incoming.respond.assert_awaited_once()
+        self.assertEqual(incoming.respond.call_args.kwargs["reply_to"], incoming.id)
+        self.assertFalse(incoming.respond.call_args.kwargs["force_document"])
+        incoming.client.send_file.assert_not_called()
+        self.run.assert_called_once()
+        self.assert_clean()
+
+    async def test_saved_messages_require_the_logged_in_account_to_be_allowlisted(self):
+        incoming = request(sender=43, out=True)
+        incoming.chat_id = incoming.client._self_id = 99
+        await self.handler.handle(incoming)
+        incoming.respond.assert_not_called()
         self.run.assert_not_called()
 
     async def test_disabled_empty_allowlist_channels_and_wrong_private_target(self):
