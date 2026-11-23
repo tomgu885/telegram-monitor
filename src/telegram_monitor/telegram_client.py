@@ -177,16 +177,27 @@ class TelethonMenuClient:
         return snapshot(message, self.bot.username)
 
     @asynccontextmanager
-    async def updates(self):
+    async def updates(self, *, result_sender: str | None = None):
+        bots = {self.bot.id: self.bot.username}
+        if result_sender and result_sender.lower().lstrip("@") != self.bot.username.lower():
+            try:
+                bot = await self.client.get_entity(result_sender)
+            except ValueError:
+                raise MonitorError("invalid_config", reason="result_bot_not_found") from None
+            if not getattr(bot, "bot", False):
+                raise MonitorError("invalid_config", reason="result_sender_is_not_a_bot")
+            bots[bot.id] = bot.username
+
         queue = asyncio.Queue(maxsize=1000)
         overflow = asyncio.Event()
 
         async def receive(event):
-            if self.matches(event.message):
+            message = event.message
+            if message.chat_id == self.target.chat_id and message.sender_id in bots:
                 if queue.full():
                     overflow.set()
                 else:
-                    queue.put_nowait(snapshot(event.message, self.bot.username))
+                    queue.put_nowait(snapshot(message, bots[message.sender_id]))
 
         self.client.add_event_handler(receive, events.NewMessage(chats=self.peer))
         self.client.add_event_handler(receive, events.MessageEdited(chats=self.peer))

@@ -79,6 +79,30 @@ def test_response_before_send_returns_is_not_lost(configuration):
     assert not fake.handlers
 
 
+def test_deploy_updates_accept_only_panel_and_notice_bots_in_target_chat(configuration):
+    fake = FakeTelegram()
+    fake.get_entity.return_value = SimpleNamespace(id=57, username="notice_bot", bot=True)
+
+    async def receive():
+        async with adapter(configuration, fake).updates(result_sender="notice_bot") as (
+            queue,
+            overflow,
+        ):
+            await fake.deliver(raw_message(101))
+            await fake.deliver(raw_message(102, sender_id=57))
+            await fake.deliver(raw_message(103, sender_id=57, chat_id=-999))
+            await fake.deliver(raw_message(104, sender_id=99))
+            assert [queue.get_nowait().sender_username for _ in range(2)] == [
+                "example_bot",
+                "notice_bot",
+            ]
+            assert queue.empty()
+            assert not overflow.is_set()
+
+    asyncio.run(receive())
+    assert not fake.handlers
+
+
 def test_wrong_sender_chat_old_messages_and_other_replies_are_ignored(configuration):
     fake = FakeTelegram()
 

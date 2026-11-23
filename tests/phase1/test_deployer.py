@@ -86,7 +86,7 @@ def test_failed_notification_can_also_contain_completion_time():
     assert match_pattern("FAILURE 完成时间:", rules().failure) == "FAILURE"
 
 
-def setup_config(configuration):
+def setup_config(configuration, result_sender="example_bot"):
     data = yaml.safe_load((configuration.root / "testa.yaml").read_text())
     data["services"] = {
         "payment-rpc": {
@@ -99,6 +99,7 @@ def setup_config(configuration):
         }
     }
     data["deployment_result"] = rules().model_dump()
+    data["deployment_result"]["sender_username"] = result_sender
     (configuration.root / "testa.yaml").write_text(yaml.safe_dump(data, allow_unicode=True))
     return Configuration(configuration.path)
 
@@ -126,7 +127,8 @@ class FakeDeployment:
         return self.current
 
     @asynccontextmanager
-    async def updates(self):
+    async def updates(self, *, result_sender=None):
+        self.result_sender = result_sender
         self.queue = asyncio.Queue()
         self.subscribed = True
         try:
@@ -178,6 +180,28 @@ def test_callback_timeout_does_not_repeat_trigger(configuration):
     output = asyncio.run(deploy(setup_config(configuration), client, "testa", "payment-rpc-testa"))
     assert output["status"] == "success"
     assert client.trigger_calls == 1
+
+
+def test_deploy_uses_panel_for_trigger_and_notice_bot_for_result(configuration):
+    config = setup_config(configuration, "notice_bot")
+    client = FakeDeployment([])
+
+    async def trigger(*_args):
+        assert client.result_sender == "notice_bot"
+        client.queue.put_nowait(
+            result_message("payment-rpc build=7 queued", 100, edit_date=datetime.now(UTC))
+        )
+        client.queue.put_nowait(result_message("payment-rpc build=7 FAILURE", 101))
+        client.queue.put_nowait(
+            result_message("payment-rpc build=8 FAILURE", 102, sender_username="notice_bot")
+        )
+        client.queue.put_nowait(result_message(ident=103, sender_username="notice_bot"))
+
+    client.trigger_button = AsyncMock(side_effect=trigger)
+    output = asyncio.run(deploy(config, client, "testa", "payment-rpc"))
+    assert output["status"] == "success"
+    assert output["result_message_id"] == 103
+    client.trigger_button.assert_awaited_once()
 
 
 def test_context_mismatch_never_clicks_action(configuration):

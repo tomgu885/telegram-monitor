@@ -31,9 +31,12 @@ class CorrelationMatcher:
         started: datetime,
         trigger_id: int,
         rules: Correlation,
+        *,
+        trigger_sender: str | None = None,
     ):
         self.chat_id = chat_id
         self.sender = sender.lower().lstrip("@")
+        self.trigger_sender = (trigger_sender or sender).lower().lstrip("@")
         self.boundary = boundary
         self.started = started
         self.reply_ids = {trigger_id}
@@ -44,7 +47,7 @@ class CorrelationMatcher:
     def observe_trigger(self, message: Message) -> bool:
         if (
             message.chat_id != self.chat_id
-            or (message.sender_username or "").lower().lstrip("@") != self.sender
+            or (message.sender_username or "").lower().lstrip("@") != self.trigger_sender
             or message.message_id != self.trigger_id
             or message.edit_date is None
             or message.edit_date < self.started

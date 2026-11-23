@@ -45,8 +45,6 @@ async def deploy(config: Configuration, client, env_name: str, service_name: str
     results = env.deployment_result
     if results is None or service_name not in results.correlation:
         raise MonitorError("invalid_config", reason="deployment_result_rules_required")
-    if results.sender_username.lower().lstrip("@") != target.bot_username.lower().lstrip("@"):
-        raise MonitorError("invalid_config", reason="deployment_sender_must_match_target")
     if len(service.menu_path) < 2 or service.menu_path[-1].match != "exact":
         raise MonitorError("invalid_config", reason="final_action_requires_exact_match")
     if not service.expected_context:
@@ -79,7 +77,7 @@ async def deploy(config: Configuration, client, env_name: str, service_name: str
         raise MonitorError("action_not_allowed", reason="not_a_single_service_deployment")
 
     # Subscribe BEFORE the final click; accept no result from before this boundary.
-    async with client.updates() as (queue, overflow):
+    async with client.updates(result_sender=results.sender_username) as (queue, overflow):
         boundary = await client.latest_message_id()
         started = datetime.now(UTC)
         matcher = CorrelationMatcher(
@@ -89,6 +87,7 @@ async def deploy(config: Configuration, client, env_name: str, service_name: str
             started.replace(microsecond=0),
             source.message_id,
             results.correlation[service_name],
+            trigger_sender=target.bot_username,
         )
         record = {
             "environment": env_name,

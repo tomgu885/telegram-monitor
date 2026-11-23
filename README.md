@@ -201,6 +201,9 @@ deployment_result:
         build_id: '构建号: (?P<value>\d+)'
 ```
 
+菜单 Bot 由群目标的 `bot_username` 指定。Jenkins 终态由另一个 Bot 发送时，把该 Bot 配置到
+`deployment_result.sender_username`。部署等待只接受配置的终态 Bot 发出的结果。
+
 success / failure 均支持 `contains` 和 `regex`，至少一个非空规则；failure 优先，避免把含有
 “完成时间”的失败通知判作成功。关联必须满足群、Bot、触发前最后消息 ID 和开始时间过滤，
 并匹配当前服务、已知 reply 链或已绑定的构建标识。Bot 编辑原菜单时可以提供构建标识，
