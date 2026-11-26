@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 from app.config import ScreenshotSettings
 from app.screenshot import ScreenshotError, capture_main_display
 from app.screenshot_handler import ScreenshotHandler
+from app.screenshot_wayland import primary_crop
 from app.storage import Storage
 from app.telegram_client import Recorder
 from tests.fakes import event, settings
@@ -90,14 +91,50 @@ class CaptureTests(unittest.TestCase):
                 self.assertIn("Screen Recording permission", str(error.exception))
                 self.assertEqual(list(self.directory.iterdir()), [])
 
-    def test_non_macos_never_invokes_command(self):
+    def test_unsupported_session_never_invokes_command(self):
         with (
             patch("app.screenshot.sys.platform", "linux"),
+            patch.dict("app.screenshot.os.environ", {"XDG_SESSION_TYPE": "x11"}),
             patch("app.screenshot.subprocess.run") as run,
             self.assertRaises(ScreenshotError),
         ):
             capture_main_display(self.directory)
         run.assert_not_called()
+
+    def test_wayland_uses_system_helper_and_cleans_up_after_failure(self):
+        with (
+            patch("app.screenshot.sys.platform", "linux"),
+            patch.dict("app.screenshot.os.environ", {"XDG_SESSION_TYPE": "wayland"}),
+            patch("app.screenshot.subprocess.run", side_effect=fake_capture) as run,
+        ):
+            path = capture_main_display(self.directory)
+            command = run.call_args.args[0]
+            self.assertEqual(command[:2], ["/usr/bin/python3", "-I"])
+            self.assertEqual(Path(command[2]).name, "screenshot_wayland.py")
+            self.assertEqual(Path(command[3]), path)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            path.unlink()
+            run.side_effect = None
+            run.return_value = SimpleNamespace(returncode=4)
+            with self.assertRaisesRegex(ScreenshotError, "did not grant a screenshot"):
+                capture_main_display(self.directory)
+        self.assertEqual(list(self.directory.iterdir()), [])
+
+    def test_wayland_crops_scaled_primary_on_right(self):
+        secondary = ("DP-1", "Vendor", "Secondary", "1")
+        primary = ("eDP-1", "Vendor", "Primary", "2")
+        state = (
+            1,
+            [
+                (secondary, [("FHD", 1920, 1080, 60.0, 1.0, [1.0], {"is-current": True})], {}),
+                (primary, [("QHD", 3072, 1920, 60.0, 1.5, [1.5], {"is-current": True})], {}),
+            ],
+            [(0, 0, 1.0, 0, False, [secondary], {}), (1920, 0, 1.5, 0, True, [primary], {})],
+            {"layout-mode": 1},
+        )
+        self.assertEqual(primary_crop(state, 5952, 1920), (2880, 0, 3072, 1920))
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            primary_crop(state, 3072, 1920)
 
 
 class HandlerTests(unittest.IsolatedAsyncioTestCase):

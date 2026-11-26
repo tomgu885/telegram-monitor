@@ -4,11 +4,13 @@ import fcntl
 import logging
 import os
 import sys
+import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
 from app.config import ConfigError, load_settings
 from app.logging_config import log_failure, setup_logging
+from app.screenshot import ScreenshotError, capture_main_display
 from app.storage import Storage
 from app.telegram_client import AuthenticationFailure, run
 
@@ -32,13 +34,22 @@ def recorder_main() -> int:
     os.umask(0o077)
     setup_logging()
     parser = argparse.ArgumentParser(description="Local Telegram recorder with opt-in screenshots")
-    parser.add_argument("--check-config", action="store_true", help="只检查配置，不连接 Telegram")
+    checks = parser.add_mutually_exclusive_group()
+    checks.add_argument("--check-config", action="store_true", help="只检查配置，不连接 Telegram")
+    checks.add_argument(
+        "--check-screenshot", action="store_true", help="本地测试主屏截图，不连接 Telegram"
+    )
     args = parser.parse_args()
     if sys.version_info < (3, 12):  # noqa: UP036 - give older interpreters a clear startup error
         logging.error("需要 Python 3.12+。")
         return 1
     result = 0
     try:
+        if args.check_screenshot:
+            with tempfile.TemporaryDirectory() as directory:
+                capture_main_display(Path(directory), local_check=True)
+            logging.info("Main-display screenshot verified locally.")
+            return 0
         settings = load_settings()
         if args.check_config:
             logging.info("Configuration valid (credentials not checked with Telegram).")
@@ -61,7 +72,7 @@ def recorder_main() -> int:
                 finally:
                     storage.close()
                     logging.info("SQLite closed; recorder stopped.")
-    except (ConfigError, AuthenticationFailure) as exc:
+    except (ConfigError, AuthenticationFailure, ScreenshotError) as exc:
         logging.error("%s", exc)
         result = 1
     except Exception as exc:
@@ -73,7 +84,7 @@ def recorder_main() -> int:
 def main() -> int:
     # Preserve the recorder's existing startup and configuration check. All new
     # subcommands/options use the same CLI as `python -m telegram_monitor`.
-    if len(sys.argv) == 1 or sys.argv[1] == "--check-config":
+    if len(sys.argv) == 1 or sys.argv[1] in {"--check-config", "--check-screenshot"}:
         return recorder_main()
 
     from telegram_monitor.cli import main as cli_main

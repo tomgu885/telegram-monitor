@@ -6,7 +6,7 @@ from time import monotonic
 
 from app.config import ScreenshotSettings
 from app.logging_config import log_failure
-from app.screenshot import capture_main_display, delete_screenshot
+from app.screenshot import ScreenshotError, capture_main_display, delete_screenshot
 
 logger = logging.getLogger("app")
 
@@ -96,13 +96,12 @@ class ScreenshotHandler:
                             await event.get_input_sender(), str(path), force_document=False
                         )
                 logger.info("[SCREENSHOT] sent sender=%s", sender)
+            except ScreenshotError as exc:
+                failed = True
+                logger.error("[SCREENSHOT] capture failed: %s", exc)
             except Exception as exc:
                 failed = True
-                log_failure(
-                    "[SCREENSHOT] request failed; capture errors may require "
-                    "Screen Recording permission",
-                    exc,
-                )
+                log_failure("[SCREENSHOT] request failed", exc)
             finally:
                 if path is not None:
                     if failed and self.settings.keep_failed:

@@ -389,9 +389,9 @@ python3 -m app
 异常仅记录异常类型和调用位置，不记录异常正文、局部变量或完整更新对象。
 Telethon 底层日志被屏蔽，避免异常包含聊天内容或 RPC 参数。
 
-## 可选：Telegram 请求主显示器截图（macOS 27）
+## 可选：Telegram 请求主显示器截图（macOS 和 Ubuntu GNOME Wayland）
 
-截图功能使用当前登录的 Telethon 普通用户账号；没有 AI、LLM、OpenAI API 或新增运行时依赖。
+截图功能使用当前登录的 Telethon 普通用户账号。Ubuntu 截图依赖 GNOME 桌面和系统 Python 的 GObject 绑定。
 旧配置无需修改即可继续运行，缺少 `screenshot` 时功能关闭。要启用，在项目根目录
 `config.yaml` 添加以下配置，并将示例 ID 换成实际授权用户的整数 ID：
 
@@ -433,9 +433,10 @@ screenshot:
   截图动作不是持久化任务：退出会取消未完成任务，已记录的请求不会在重启后重试。
   尚未记录的离线新消息可能通过现有 `catch_up` 机制触发一次截图。
 
-只调用固定命令 `/usr/sbin/screencapture -m -x <程序生成的临时PNG>`，不使用 `shell=True`。
-`-m` 只截主显示器，`-x` 静音；文件名唯一，不接受 Telegram 指定的路径、显示器或参数。
-截图命令超时为 15 秒，发送超时为 60 秒；不实现其他平台截图。
+程序根据运行系统和桌面会话自动选择截图方式，两种系统共用同一套 `screenshot` 配置。
+macOS 使用 `screencapture -m -x`。Ubuntu 26.10 的 GNOME Wayland 会话通过系统截图 Portal 获取图片，
+扩展桌面按 GNOME 的显示器布局裁剪主屏。若截图尺寸与布局不匹配，则跳过发送。
+截图子进程使用固定参数与唯一临时路径，截图超时为 15 秒，发送超时为 60 秒。
 `temp_dir` 相对项目根目录解析，与启动目录无关，也支持本机配置的绝对路径。
 新建截图目录权限为 `0700`，PNG 为 `0600`。默认目录在 Git 忽略的 `data/` 内，
 自定义目录时也应放在 Git 忽略且访问受限的位置。
@@ -445,18 +446,34 @@ screenshot:
 取消时会等待正在执行的截图子进程结束后再清理；强杀/断电无法执行 `finally`，
 可能留下文件，需要停机后检查临时目录。日志只记录 sender/message ID、大小和状态，路径脱敏。
 
-### 屏幕录制权限
+### macOS 屏幕录制权限
 
 首次截图可能需要 macOS 授权。到 **System Settings → Privacy & Security →
 Screen & System Audio Recording**，为实际运行 Python 的宿主程序授权，例如 Terminal、
 iTerm 或 Ghostty；以后封装为 app 时给对应 app 授权。按系统提示重启宿主程序。
-程序不会绕过权限系统，捕获失败会在日志提示检查 Screen Recording permission。
+捕获失败时，日志会提示检查 Screen Recording 权限。
 [Apple 权限说明](https://support.apple.com/en-gb/guide/mac-help/mchl592e5686/mac)。
+
+### Ubuntu 26.10 GNOME Wayland 授权
+
+从项目根目录执行以下命令。若系统已经安装所列软件包，可以跳过第一行。
+
+```bash
+sudo apt install xdg-desktop-portal-gnome python3-gi gir1.2-gtk-4.0 gir1.2-gdkpixbuf-2.0
+install -D -m 644 desktop/io.github.tomgu885.TelegramMonitor.desktop \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/applications/io.github.tomgu885.TelegramMonitor.desktop"
+python3 -m app --check-screenshot
+```
+
+在本机已登录且解锁的 GNOME 桌面上，按提示为 **Telegram Monitor** 授权。验收命令最多等 60 秒，
+会在本机生成并删除临时 PNG，无需 Telegram 配置或连接。桌面保存授权后，Telegram 截图请求可在后台执行。
+监听器应以同一桌面用户运行，并继承 GNOME Wayland 会话环境。
+[系统截图 Portal 接口](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Screenshot.html)。
 
 ### 手动验收
 
 在运行目录执行 `python3 -m app --check-config`，再执行 `python3 -m app`。
-配置修改后需要重启。先使用无敏感内容的测试桌面：
+配置修改后需要重启。请使用无敏感内容的测试桌面。
 
 1. 授权用户私聊发 `截图`，应在原私聊收到回复该消息的图片预览（非文件附件）；超过 5 秒再发 `screenshot`
    也应成功。发送后检查 `data/screenshots` 无残留 PNG。
@@ -468,8 +485,8 @@ iTerm 或 Ghostty；以后封装为 app 时给对应 app 授权。按系统提�
 6. 配置授权用户同时命中 `important.user_ids`，确认请求存在于 SQLite、普通 JSONL
    与 important JSONL；截图失败也应留下请求记录。
 
-自动测试全部 mock `subprocess.run` 和 Telegram 发送，不会真实截屏、上传或连接 Telegram。
-真实 Screen Recording 权限、Telegram 收图和多显示器效果需按以上步骤验收。
+自动测试模拟截图子进程和 Telegram 发送，并验证多屏裁剪坐标。
+实际桌面授权、Telegram 收图和多显示器效果可按上述步骤验收。
 
 ## 目录与主要模块
 
